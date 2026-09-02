@@ -4,7 +4,9 @@ __pycache__/
 .pytest_cache/
 .streamlit/secrets.toml
 .env
+.DS_Store
 data/raw/*
 data/processed/*
+data/*.sqlite
 models/*
 !.gitkeep

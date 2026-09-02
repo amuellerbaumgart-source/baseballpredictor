@@ -1,2 +1,6 @@
 streamlit
 pytest
+requests
+pandas
+scikit-learn
+joblib

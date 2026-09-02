@@ -1,27 +1,124 @@
-"""Streamlit interface for the MLB game prediction baseline."""
+"""Streamlit interface for readable MLB forecasts."""
+from datetime import date, timedelta
+import json
+import pandas as pd
 import streamlit as st
-from src.models.baseline import MLB_TEAMS, predict_game
 
-st.set_page_config(page_title="MLB Game Predictor", page_icon="⚾")
-st.title("MLB Game Predictor")
-st.caption("A transparent baseline model. Probabilities are estimates, not guarantees.")
-st.header("Game information")
-home_team = st.selectbox("Home team", MLB_TEAMS, index=MLB_TEAMS.index("LAD"))
-away_team = st.selectbox("Away team", MLB_TEAMS, index=MLB_TEAMS.index("NYY"))
-home_pitcher = st.text_input("Home starting pitcher (optional)")
-away_pitcher = st.text_input("Away starting pitcher (optional)")
-st.header("Lineup information")
-st.write("The current baseline uses lineup completeness. Player-level statistics will be added in the next milestone.")
-home_lineup = [st.text_input(f"Home batter {i + 1}", key=f"home-{i}") for i in range(9)]
-away_lineup = [st.text_input(f"Away batter {i + 1}", key=f"away-{i}") for i in range(9)]
+from src.data.ingest import backfill_historical, refresh_game_details, refresh_games, refresh_probable_pitcher_stats, refresh_teams
+from src.data.mlb_api import MLBAPIError, MLBClient
+from src.data.store import Store
+from src.models.features import build_features
+from src.models.predictor import predict_with_model
+from src.models.trainer import train_models
 
-if st.button("Predict", type="primary"):
-    if home_team == away_team:
-        st.error("Choose two different teams.")
-    else:
-        result = predict_game(home_team, away_team, home_pitcher=home_pitcher, away_pitcher=away_pitcher, home_lineup=home_lineup, away_lineup=away_lineup)
-        st.subheader("Prediction")
+st.set_page_config(page_title="MLB Forecast", page_icon="⚾", layout="wide")
+st.markdown("<style>.block-container{max-width:1200px;padding-top:2rem}.hero{padding:1.5rem 2rem;border-radius:16px;background:linear-gradient(120deg,#102a43,#1f5f8b);color:white;margin-bottom:1.5rem}.game-card{padding:1rem;border:1px solid #dbe4ee;border-radius:12px;margin-bottom:1rem}</style>", unsafe_allow_html=True)
+st.markdown("<div class='hero'><h1>⚾ MLB Forecast</h1><p>Early and lineup-enhanced win probabilities for scheduled MLB games.</p></div>", unsafe_allow_html=True)
+
+store, client = Store(), MLBClient()
+
+def game_label(game):
+    return f"{game['away_team_name']} at {game['home_team_name']} · {game['game_date']}"
+
+def feature_input(game):
+    home_lineup = json.loads(game["home_lineup_json"] or "[]")
+    away_lineup = json.loads(game["away_lineup_json"] or "[]")
+    season = int(str(game["game_date"])[:4])
+    home_record, away_record = store.team_record(game["home_team_id"], season), store.team_record(game["away_team_id"], season)
+    home_pitcher, away_pitcher = store.pitcher_record(game["home_probable_pitcher_id"], season), store.pitcher_record(game["away_probable_pitcher_id"], season)
+    home_stats, away_stats = store.pitcher_stats(game["home_probable_pitcher_id"], season), store.pitcher_stats(game["away_probable_pitcher_id"], season)
+    return {"home_advantage": 1.0, "home_win_rate": home_record["wins"] / max(1, home_record["wins"] + home_record["losses"]), "away_win_rate": away_record["wins"] / max(1, away_record["wins"] + away_record["losses"]), "home_wins": home_record["wins"], "home_losses": home_record["losses"], "away_wins": away_record["wins"], "away_losses": away_record["losses"], "home_streak": home_record["streak"], "away_streak": away_record["streak"], "home_runs_for": 4.5, "home_runs_against": 4.5, "away_runs_for": 4.5, "away_runs_against": 4.5, "home_rest": 3.0, "away_rest": 3.0, "home_pitcher_known": float(bool(game["home_pitcher_name"])), "away_pitcher_known": float(bool(game["away_pitcher_name"])), "home_pitcher_wins": home_pitcher["wins"], "home_pitcher_losses": home_pitcher["losses"], "away_pitcher_wins": away_pitcher["wins"], "away_pitcher_losses": away_pitcher["losses"], "home_pitcher_era": home_stats["era"] if home_stats["available"] else 4.20, "away_pitcher_era": away_stats["era"] if away_stats["available"] else 4.20, "home_lineup_strength": float(len(home_lineup)), "away_lineup_strength": float(len(away_lineup)), "lineup_complete": float(len(home_lineup) >= 9 and len(away_lineup) >= 9)}
+
+def record_text(record):
+    streak = f"{record['streak']} straight" if record["streak"] > 0 else f"{abs(record['streak'])} straight losses" if record["streak"] < 0 else "no active streak"
+    return f"{record['wins']}-{record['losses']} · {streak}"
+
+def pitcher_text(name, record, stats):
+    if not name: return "Not announced"
+    parts = [name]
+    if record["available"]: parts.append(f"{record['wins']}-{record['losses']}")
+    if stats["available"]: parts.append(f"ERA {stats['era']:.2f}")
+    return " · ".join(parts)
+
+with st.sidebar:
+    st.header("Data center")
+    st.caption(f"Database: `{store.path}`")
+    st.metric("Cached games", store.count_games())
+    if st.button("Refresh upcoming games", use_container_width=True):
+        try:
+            refresh_teams(store, client)
+            refresh_games(store, client, date.today(), date.today() + timedelta(days=7))
+            upcoming = [dict(row) for row in store.upcoming_games()]
+            stats_count = refresh_probable_pitcher_stats(store, client, upcoming)
+            st.success(f"Updated {len(upcoming)} schedule rows and cached {stats_count} pitcher stat records. Existing games were not duplicated.")
+        except MLBAPIError as exc: st.error(str(exc))
+    if st.button("Backfill last 3 seasons", use_container_width=True):
+        try:
+            count = backfill_historical(store, client, date(date.today().year - 3, 1, 1), date.today())
+            st.success(f"Backfilled {count} rows. Existing game IDs were updated.")
+        except MLBAPIError as exc: st.error(str(exc))
+    if st.button("Train models", use_container_width=True):
+        rows = [dict(row) for row in store.completed_games()]
+        if len(rows) < 30: st.warning("Backfill historical data first; at least 30 completed games are required.")
+        else:
+            try:
+                results = train_models(build_features(pd.DataFrame(rows)))
+                st.success("Early model trained" + (" and enhanced model trained." if "enhanced" in results else ". Enhanced model needs 30 complete-lineup games."))
+            except (ValueError, KeyError) as exc: st.error(str(exc))
+
+tab_schedule, tab_forecast, tab_status = st.tabs(["Upcoming games", "Matchup forecast", "Database & model"])
+with tab_schedule:
+    st.subheader("Upcoming schedule")
+    games = store.upcoming_games()
+    if not games: st.info("Click Refresh upcoming games to load the schedule.")
+    for game in games:
+        with st.container(border=True):
+            st.markdown(f"### {game['away_team_name']} at {game['home_team_name']}")
+            location = ", ".join(x for x in (game["venue_name"], game["venue_city"]) if x)
+            local_time = game["scheduled_local_time"].replace("T", " ")[:16] if game["scheduled_local_time"] else game["game_date"]
+            st.write(" · ".join(x for x in (location, f"{local_time} venue time", game["status_detail"] or game["status"]) if x))
+            season = int(str(game["game_date"])[:4])
+            home_record, away_record = store.team_record(game["home_team_id"], season), store.team_record(game["away_team_id"], season)
+            st.caption(f"{game['away_team_name']}: {record_text(away_record)} · {game['home_team_name']}: {record_text(home_record)}")
+            season = int(str(game["game_date"])[:4])
+            away_record, home_record = store.pitcher_record(game["away_probable_pitcher_id"], season), store.pitcher_record(game["home_probable_pitcher_id"], season)
+            away_stats, home_stats = store.pitcher_stats(game["away_probable_pitcher_id"], season), store.pitcher_stats(game["home_probable_pitcher_id"], season)
+            st.caption(f"Probable pitchers: {pitcher_text(game['away_pitcher_name'], away_record, away_stats)} vs {pitcher_text(game['home_pitcher_name'], home_record, home_stats)} · Lineups: {game['lineup_status']}")
+            if st.button("Refresh game details", key=f"details-{game['game_pk']}"):
+                try: refresh_game_details(store, client, game["game_pk"]); st.success("Game details updated. Refresh the page to see the latest data.")
+                except MLBAPIError as exc: st.error(str(exc))
+
+with tab_forecast:
+    st.subheader("Matchup forecast")
+    games = store.upcoming_games()
+    if games:
+        options = {game_label(g): g for g in games}
+        selected = st.selectbox("Select a game", list(options))
+        game = options[selected]
+        location = ", ".join(x for x in (game["venue_name"], game["venue_city"]) if x)
+        time_text = f"{game['scheduled_local_time'].replace('T', ' ')[:16]} venue time" if game["scheduled_local_time"] else ""
+        if location or time_text: st.write(" · ".join(x for x in (location, time_text) if x))
+        season = int(str(game["game_date"])[:4])
+        home_record, away_record = store.team_record(game["home_team_id"], season), store.team_record(game["away_team_id"], season)
+        st.caption(f"{game['away_team_name']}: {record_text(away_record)} · {game['home_team_name']}: {record_text(home_record)}")
         left, right = st.columns(2)
-        left.metric(f"{home_team} win probability", f"{result.home_win_probability:.1%}")
-        right.metric(f"{away_team} win probability", f"{result.away_win_probability:.1%}")
-        st.info(result.explanation)
+        home_lineup, away_lineup = json.loads(game["home_lineup_json"] or "[]"), json.loads(game["away_lineup_json"] or "[]")
+        home_pitcher, away_pitcher = store.pitcher_record(game["home_probable_pitcher_id"], season), store.pitcher_record(game["away_probable_pitcher_id"], season)
+        left.info(f"{game['home_team_name']} pitcher: {pitcher_text(game['home_pitcher_name'], home_pitcher, store.pitcher_stats(game['home_probable_pitcher_id'], season))}\n\nLineup: {game['lineup_status']}")
+        right.info(f"{game['away_team_name']} pitcher: {pitcher_text(game['away_pitcher_name'], away_pitcher, store.pitcher_stats(game['away_probable_pitcher_id'], season))}\n\nLineup: {game['lineup_status']}")
+        left.write("Home batting order"); left.write("\n".join(f"{i}. {name}" for i, name in enumerate(home_lineup, 1)) or "Not announced")
+        right.write("Away batting order"); right.write("\n".join(f"{i}. {name}" for i, name in enumerate(away_lineup, 1)) or "Not announced")
+        if st.button("Refresh pitchers and lineups", key="selected-refresh"):
+            try: refresh_game_details(store, client, game["game_pk"]); st.rerun()
+            except MLBAPIError as exc: st.error(str(exc))
+        if st.button("Generate forecast", type="primary"):
+            result, version = predict_with_model(game["home_team_name"], game["away_team_name"], feature_input(game))
+            c1, c2 = st.columns(2); c1.metric(f"{game['home_team_name']} win probability", f"{result.home_win_probability:.1%}"); c2.metric(f"{game['away_team_name']} win probability", f"{result.away_win_probability:.1%}")
+            st.caption(f"Model: {version} · Lineup state: {game['lineup_status']} · MLB game ID: {game['game_pk']}"); st.info(result.explanation)
+    else: st.info("Load upcoming games first.")
+
+with tab_status:
+    st.subheader("Database and model status")
+    st.write(f"Completed games available for training: **{len(store.completed_games())}**")
+    st.write("Every game is keyed by MLB `game_pk`. Refreshing the same date range updates existing games and preserves details; it does not create duplicate games. This is an idempotent upsert, not a multi-process lock.")
+    st.write("The early model uses basic team and game context and can predict without a lineup. The enhanced model is selected only when both batting orders are complete and its artifact exists.")
