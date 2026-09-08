@@ -61,3 +61,14 @@ def test_repeated_game_refresh_is_idempotent_and_preserves_details(tmp_path):
     assert store.count_games() == 1
     assert row["home_pitcher_name"] == "Home Starter"
     assert row["home_lineup_json"] == '["A"]'
+
+def test_upcoming_games_can_exclude_stale_non_final_rows(tmp_path):
+    store = Store(str(tmp_path / "mlb.sqlite"))
+    games = []
+    for pk, game_date in [(1, "2026-09-07"), (2, "2026-09-08"), (3, "2026-09-09")]:
+        games.append({"gamePk": pk, "officialDate": game_date, "gameDate": f"{game_date}T19:00:00Z", "status": {"abstractGameState": "Preview"}, "teams": {"home": {"team": {"id": 10}}, "away": {"team": {"id": 20}}}})
+    store.upsert_games(games)
+
+    rows = store.upcoming_games(start_date=date(2026, 9, 8))
+
+    assert [row["game_pk"] for row in rows] == [2, 3]

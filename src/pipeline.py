@@ -24,7 +24,7 @@ def main() -> None:
         client = MLBClient()
         refresh_teams(store, client)
         refresh_games(store, client, date.today(), date.today() + timedelta(days=args.days))
-        count = refresh_probable_pitcher_stats(store, client, [dict(row) for row in store.upcoming_games()])
+        count = refresh_probable_pitcher_stats(store, client, [dict(row) for row in store.upcoming_games(start_date=date.today())])
         print(f"Refreshed upcoming schedule and cached {count} pitcher stat records.")
         return
     if args.action == "backfill":

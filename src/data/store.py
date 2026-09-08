@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import sqlite3
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
@@ -81,9 +81,16 @@ class Store:
             return {"era": None, "wins": 0, "losses": 0, "available": False}
         return {"era": row["era"], "wins": row["wins"], "losses": row["losses"], "available": row["era"] is not None}
 
-    def upcoming_games(self, limit: int = 100):
+    def upcoming_games(self, limit: int = 100, start_date: date | None = None):
         with self.connect() as db:
-            return db.execute("SELECT * FROM games WHERE status != 'Final' ORDER BY game_datetime LIMIT ?", (limit,)).fetchall()
+            query = "SELECT * FROM games WHERE status != 'Final'"
+            params: list[object] = []
+            if start_date is not None:
+                query += " AND game_date >= ?"
+                params.append(start_date.isoformat())
+            query += " ORDER BY game_datetime LIMIT ?"
+            params.append(limit)
+            return db.execute(query, params).fetchall()
 
     def completed_games(self):
         with self.connect() as db:

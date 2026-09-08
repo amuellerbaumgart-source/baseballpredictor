@@ -27,7 +27,7 @@ def feature_input(game):
     home_record, away_record = store.team_record(game["home_team_id"], season), store.team_record(game["away_team_id"], season)
     home_pitcher, away_pitcher = store.pitcher_record(game["home_probable_pitcher_id"], season), store.pitcher_record(game["away_probable_pitcher_id"], season)
     home_stats, away_stats = store.pitcher_stats(game["home_probable_pitcher_id"], season), store.pitcher_stats(game["away_probable_pitcher_id"], season)
-    return {"home_advantage": 1.0, "home_win_rate": home_record["wins"] / max(1, home_record["wins"] + home_record["losses"]), "away_win_rate": away_record["wins"] / max(1, away_record["wins"] + away_record["losses"]), "home_wins": home_record["wins"], "home_losses": home_record["losses"], "away_wins": away_record["wins"], "away_losses": away_record["losses"], "home_streak": home_record["streak"], "away_streak": away_record["streak"], "home_runs_for": 4.5, "home_runs_against": 4.5, "away_runs_for": 4.5, "away_runs_against": 4.5, "home_rest": 3.0, "away_rest": 3.0, "home_pitcher_known": float(bool(game["home_pitcher_name"])), "away_pitcher_known": float(bool(game["away_pitcher_name"])), "home_pitcher_wins": home_pitcher["wins"], "home_pitcher_losses": home_pitcher["losses"], "away_pitcher_wins": away_pitcher["wins"], "away_pitcher_losses": away_pitcher["losses"], "home_pitcher_era": home_stats["era"] if home_stats["available"] else 4.20, "away_pitcher_era": away_stats["era"] if away_stats["available"] else 4.20, "home_lineup_strength": float(len(home_lineup)), "away_lineup_strength": float(len(away_lineup)), "lineup_complete": float(len(home_lineup) >= 9 and len(away_lineup) >= 9)}
+    return {"home_advantage": 1.0, "home_win_rate": home_record["wins"] / max(1, home_record["wins"] + home_record["losses"]), "away_win_rate": away_record["wins"] / max(1, away_record["wins"] + away_record["losses"]), "home_wins": home_record["wins"], "home_losses": home_record["losses"], "away_wins": away_record["wins"], "away_losses": away_record["losses"], "home_streak": home_record["streak"], "away_streak": away_record["streak"], "home_runs_for": 4.5, "home_runs_against": 4.5, "away_runs_for": 4.5, "away_runs_against": 4.5, "home_rest": 3.0, "away_rest": 3.0, "home_pitcher_known": float(bool(game["home_pitcher_name"])), "away_pitcher_known": float(bool(game["away_pitcher_name"])), "home_pitcher_wins": home_pitcher["wins"], "home_pitcher_losses": home_pitcher["losses"], "away_pitcher_wins": away_pitcher["wins"], "away_pitcher_losses": away_pitcher["losses"], "home_pitcher_era": home_stats["era"] if home_stats["available"] else 4.20, "away_pitcher_era": away_stats["era"] if away_stats["available"] else 4.20, "home_lineup_strength": float(len(home_lineup)), "away_lineup_strength": float(len(away_lineup)), "lineup_complete": float(len(home_lineup) >= 9 and len(away_lineup) >= 9), "home_pitcher": game["home_pitcher_name"] or "", "away_pitcher": game["away_pitcher_name"] or "", "home_lineup": home_lineup, "away_lineup": away_lineup}
 
 def record_text(record):
     streak = f"{record['streak']} straight" if record["streak"] > 0 else f"{abs(record['streak'])} straight losses" if record["streak"] < 0 else "no active streak"
@@ -48,7 +48,7 @@ with st.sidebar:
         try:
             refresh_teams(store, client)
             refresh_games(store, client, date.today(), date.today() + timedelta(days=7))
-            upcoming = [dict(row) for row in store.upcoming_games()]
+            upcoming = [dict(row) for row in store.upcoming_games(start_date=date.today())]
             stats_count = refresh_probable_pitcher_stats(store, client, upcoming)
             st.success(f"Updated {len(upcoming)} schedule rows and cached {stats_count} pitcher stat records. Existing games were not duplicated.")
         except MLBAPIError as exc: st.error(str(exc))
@@ -69,7 +69,7 @@ with st.sidebar:
 tab_schedule, tab_forecast, tab_status = st.tabs(["Upcoming games", "Matchup forecast", "Database & model"])
 with tab_schedule:
     st.subheader("Upcoming schedule")
-    games = store.upcoming_games()
+    games = store.upcoming_games(start_date=date.today())
     if not games: st.info("Click Refresh upcoming games to load the schedule.")
     for game in games:
         with st.container(border=True):
@@ -90,7 +90,7 @@ with tab_schedule:
 
 with tab_forecast:
     st.subheader("Matchup forecast")
-    games = store.upcoming_games()
+    games = store.upcoming_games(start_date=date.today())
     if games:
         options = {game_label(g): g for g in games}
         selected = st.selectbox("Select a game", list(options))
