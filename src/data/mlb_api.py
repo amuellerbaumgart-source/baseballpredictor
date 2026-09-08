@@ -31,12 +31,13 @@ class MLBAPIError(RuntimeError):
 class MLBClient:
     def __init__(self, base_url: str = "https://statsapi.mlb.com/api/v1", timeout: int = 15, session=None):
         self.base_url = base_url.rstrip("/")
+        self.live_base_url = self.base_url.replace("/v1", "/v1.1", 1)
         self.timeout = timeout
         self.session = session or requests.Session()
 
-    def _get(self, path: str, **params: Any) -> dict[str, Any]:
+    def _get(self, path: str, base_url: str | None = None, **params: Any) -> dict[str, Any]:
         try:
-            response = self.session.get(f"{self.base_url}/{path.lstrip('/')}", params=params, timeout=self.timeout)
+            response = self.session.get(f"{(base_url or self.base_url)}/{path.lstrip('/')}", params=params, timeout=self.timeout)
             response.raise_for_status()
             payload = response.json()
         except (requests.RequestException, ValueError) as exc:
@@ -77,7 +78,7 @@ class MLBClient:
         return {"game_pk": game.get("gamePk"), "game_date": game.get("officialDate", ""), "game_datetime": scheduled, "scheduled_local_time": local_time, "game_type": game.get("gameType", "R"), "status": game.get("status", {}).get("abstractGameState", "Unknown"), "status_detail": game.get("status", {}).get("detailedState", ""), "home_team_id": home.get("team", {}).get("id"), "away_team_id": away.get("team", {}).get("id"), "home_team_code": home.get("team", {}).get("abbreviation", ""), "away_team_code": away.get("team", {}).get("abbreviation", ""), "home_team_name": home.get("team", {}).get("name", "Home team"), "away_team_name": away.get("team", {}).get("name", "Away team"), "home_score": home.get("score"), "away_score": away.get("score"), "venue_name": venue.get("name", ""), "venue_city": venue.get("location", {}).get("city", ""), "venue_timezone": timezone, "home_probable_pitcher_id": home.get("probablePitcher", {}).get("id"), "away_probable_pitcher_id": away.get("probablePitcher", {}).get("id"), "home_pitcher_name": home.get("probablePitcher", {}).get("fullName", ""), "away_pitcher_name": away.get("probablePitcher", {}).get("fullName", "")}
 
     def game_feed(self, game_pk: int) -> dict[str, Any]:
-        return self._get(f"game/{game_pk}/feed/live")
+        return self._get(f"game/{game_pk}/feed/live", base_url=self.live_base_url)
 
     @staticmethod
     def extract_game_details(feed: dict[str, Any]) -> dict[str, Any]:

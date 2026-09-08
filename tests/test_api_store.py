@@ -12,8 +12,16 @@ class FakeSession:
         assert url.endswith("/schedule")
         return FakeResponse({"dates": [{"games": [{"gamePk": 1}]}]})
 
+class LiveFeedSession:
+    def get(self, url, **kwargs):
+        assert url.endswith("/api/v1.1/game/824792/feed/live")
+        return FakeResponse({"gameData": {}, "liveData": {}})
+
 def test_schedule_parses_games():
     assert MLBClient(session=FakeSession()).games(date(2026, 4, 1)) == [{"gamePk": 1}]
+
+def test_game_feed_uses_live_api_version():
+    assert MLBClient(session=LiveFeedSession()).game_feed(824792) == {"gameData": {}, "liveData": {}}
 
 
 def test_normalize_game_creates_readable_local_summary():
