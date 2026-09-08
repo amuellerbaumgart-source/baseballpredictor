@@ -7,7 +7,7 @@ import streamlit as st
 from src.data.ingest import backfill_historical, refresh_game_details, refresh_games, refresh_probable_pitcher_stats, refresh_teams
 from src.data.mlb_api import MLBAPIError, MLBClient, format_pacific_time
 from src.data.store import Store
-from src.models.features import build_features
+from src.models.features import build_features, build_prediction_features
 from src.models.predictor import predict_with_model
 from src.models.trainer import train_models
 
@@ -24,10 +24,13 @@ def feature_input(game):
     home_lineup = json.loads(game["home_lineup_json"] or "[]")
     away_lineup = json.loads(game["away_lineup_json"] or "[]")
     season = int(str(game["game_date"])[:4])
-    home_record, away_record = store.team_record(game["home_team_id"], season), store.team_record(game["away_team_id"], season)
-    home_pitcher, away_pitcher = store.pitcher_record(game["home_probable_pitcher_id"], season), store.pitcher_record(game["away_probable_pitcher_id"], season)
     home_stats, away_stats = store.pitcher_stats(game["home_probable_pitcher_id"], season), store.pitcher_stats(game["away_probable_pitcher_id"], season)
-    return {"home_advantage": 1.0, "home_win_rate": home_record["wins"] / max(1, home_record["wins"] + home_record["losses"]), "away_win_rate": away_record["wins"] / max(1, away_record["wins"] + away_record["losses"]), "home_wins": home_record["wins"], "home_losses": home_record["losses"], "away_wins": away_record["wins"], "away_losses": away_record["losses"], "home_streak": home_record["streak"], "away_streak": away_record["streak"], "home_runs_for": 4.5, "home_runs_against": 4.5, "away_runs_for": 4.5, "away_runs_against": 4.5, "home_rest": 3.0, "away_rest": 3.0, "home_pitcher_known": float(bool(game["home_pitcher_name"])), "away_pitcher_known": float(bool(game["away_pitcher_name"])), "home_pitcher_wins": home_pitcher["wins"], "home_pitcher_losses": home_pitcher["losses"], "away_pitcher_wins": away_pitcher["wins"], "away_pitcher_losses": away_pitcher["losses"], "home_pitcher_era": home_stats["era"] if home_stats["available"] else 4.20, "away_pitcher_era": away_stats["era"] if away_stats["available"] else 4.20, "home_lineup_strength": float(len(home_lineup)), "away_lineup_strength": float(len(away_lineup)), "lineup_complete": float(len(home_lineup) >= 9 and len(away_lineup) >= 9), "home_pitcher": game["home_pitcher_name"] or "", "away_pitcher": game["away_pitcher_name"] or "", "home_lineup": home_lineup, "away_lineup": away_lineup}
+    candidate = dict(game)
+    candidate.update({"home_lineup": home_lineup, "away_lineup": away_lineup, "home_pitcher_era": home_stats["era"] if home_stats["available"] else 4.20, "away_pitcher_era": away_stats["era"] if away_stats["available"] else 4.20})
+    history = pd.DataFrame([dict(row) for row in store.completed_games()])
+    features = build_prediction_features(candidate, history)
+    features.update({"home_pitcher": game["home_pitcher_name"] or "", "away_pitcher": game["away_pitcher_name"] or "", "home_lineup": home_lineup, "away_lineup": away_lineup})
+    return features
 
 def record_text(record):
     streak = f"{record['streak']} straight" if record["streak"] > 0 else f"{abs(record['streak'])} straight losses" if record["streak"] < 0 else "no active streak"
