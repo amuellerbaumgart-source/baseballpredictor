@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 
 from src.data.ingest import backfill_historical, refresh_game_details, refresh_games, refresh_probable_pitcher_stats, refresh_teams
-from src.data.mlb_api import MLBAPIError, MLBClient
+from src.data.mlb_api import MLBAPIError, MLBClient, format_pacific_time
 from src.data.store import Store
 from src.models.features import build_features
 from src.models.predictor import predict_with_model
@@ -75,8 +75,8 @@ with tab_schedule:
         with st.container(border=True):
             st.markdown(f"### {game['away_team_name']} at {game['home_team_name']}")
             location = ", ".join(x for x in (game["venue_name"], game["venue_city"]) if x)
-            local_time = game["scheduled_local_time"].replace("T", " ")[:16] if game["scheduled_local_time"] else game["game_date"]
-            st.write(" · ".join(x for x in (location, f"{local_time} venue time", game["status_detail"] or game["status"]) if x))
+            pacific_time = format_pacific_time(game["game_datetime"], game["game_date"])
+            st.write(" · ".join(x for x in (location, pacific_time, game["status_detail"] or game["status"]) if x))
             season = int(str(game["game_date"])[:4])
             home_record, away_record = store.team_record(game["home_team_id"], season), store.team_record(game["away_team_id"], season)
             st.caption(f"{game['away_team_name']}: {record_text(away_record)} · {game['home_team_name']}: {record_text(home_record)}")
@@ -96,7 +96,7 @@ with tab_forecast:
         selected = st.selectbox("Select a game", list(options))
         game = options[selected]
         location = ", ".join(x for x in (game["venue_name"], game["venue_city"]) if x)
-        time_text = f"{game['scheduled_local_time'].replace('T', ' ')[:16]} venue time" if game["scheduled_local_time"] else ""
+        time_text = format_pacific_time(game["game_datetime"], game["game_date"])
         if location or time_text: st.write(" · ".join(x for x in (location, time_text) if x))
         season = int(str(game["game_date"])[:4])
         home_record, away_record = store.team_record(game["home_team_id"], season), store.team_record(game["away_team_id"], season)

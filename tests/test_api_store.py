@@ -1,5 +1,5 @@
 from datetime import date
-from src.data.mlb_api import MLBClient
+from src.data.mlb_api import MLBClient, format_pacific_time
 from src.data.store import Store
 
 class FakeResponse:
@@ -22,6 +22,17 @@ def test_normalize_game_creates_readable_local_summary():
     assert normalized["away_team_name"] == "San Diego Padres"
     assert normalized["venue_name"] == "Great American Ball Park"
     assert normalized["scheduled_local_time"].startswith("2026-09-02T18:40:00")
+
+def test_normalize_game_supports_nested_venue_timezone():
+    game = {"gamePk": 10, "officialDate": "2026-09-08", "gameDate": "2026-09-08T22:35:00Z", "status": {"abstractGameState": "Preview"}, "teams": {"home": {"team": {"id": 110, "name": "Baltimore Orioles"}}, "away": {"team": {"id": 111, "name": "Cleveland Guardians"}}}, "venue": {"name": "Oriole Park at Camden Yards", "timeZone": {"id": "America/New_York", "offset": -4, "tz": "EDT"}}}
+
+    normalized = MLBClient.normalize_game(game)
+
+    assert normalized["venue_timezone"] == "America/New_York"
+    assert normalized["scheduled_local_time"].startswith("2026-09-08T18:35:00")
+
+def test_format_pacific_time_uses_canonical_utc_timestamp():
+    assert format_pacific_time("2026-09-08T22:35:00Z") == "2026-09-08 03:35 PM PT"
 
 def test_store_upserts_and_reads_games(tmp_path):
     store = Store(str(tmp_path / "mlb.sqlite"))

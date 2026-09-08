@@ -8,6 +8,21 @@ from typing import Any
 
 import requests
 
+PACIFIC_TIMEZONE = ZoneInfo("America/Los_Angeles")
+
+
+def format_pacific_time(game_datetime: str | None, fallback: str = "") -> str:
+    """Format an ISO game timestamp in Pacific time for display."""
+    if not game_datetime:
+        return fallback
+    try:
+        timestamp = datetime.fromisoformat(game_datetime.replace("Z", "+00:00"))
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=ZoneInfo("UTC"))
+        return timestamp.astimezone(PACIFIC_TIMEZONE).strftime("%Y-%m-%d %I:%M %p PT")
+    except (AttributeError, TypeError, ValueError):
+        return fallback or game_datetime
+
 
 class MLBAPIError(RuntimeError):
     """Raised when MLB StatsAPI cannot provide a valid response."""
@@ -45,13 +60,19 @@ class MLBClient:
         teams = game.get("teams", {})
         home, away = teams.get("home", {}), teams.get("away", {})
         venue = game.get("venue", {})
-        timezone = venue.get("timeZone", "UTC")
+        timezone_value = venue.get("timeZone", "UTC")
+        if isinstance(timezone_value, dict):
+            timezone = timezone_value.get("id") or timezone_value.get("tz") or "UTC"
+        elif isinstance(timezone_value, str) and timezone_value:
+            timezone = timezone_value
+        else:
+            timezone = "UTC"
         scheduled = game.get("gameDate")
         local_time = ""
         if scheduled:
             try:
                 local_time = datetime.fromisoformat(scheduled.replace("Z", "+00:00")).astimezone(ZoneInfo(timezone)).isoformat()
-            except (ValueError, KeyError):
+            except (ValueError, KeyError, TypeError):
                 local_time = scheduled
         return {"game_pk": game.get("gamePk"), "game_date": game.get("officialDate", ""), "game_datetime": scheduled, "scheduled_local_time": local_time, "game_type": game.get("gameType", "R"), "status": game.get("status", {}).get("abstractGameState", "Unknown"), "status_detail": game.get("status", {}).get("detailedState", ""), "home_team_id": home.get("team", {}).get("id"), "away_team_id": away.get("team", {}).get("id"), "home_team_code": home.get("team", {}).get("abbreviation", ""), "away_team_code": away.get("team", {}).get("abbreviation", ""), "home_team_name": home.get("team", {}).get("name", "Home team"), "away_team_name": away.get("team", {}).get("name", "Away team"), "home_score": home.get("score"), "away_score": away.get("score"), "venue_name": venue.get("name", ""), "venue_city": venue.get("location", {}).get("city", ""), "venue_timezone": timezone, "home_probable_pitcher_id": home.get("probablePitcher", {}).get("id"), "away_probable_pitcher_id": away.get("probablePitcher", {}).get("id"), "home_pitcher_name": home.get("probablePitcher", {}).get("fullName", ""), "away_pitcher_name": away.get("probablePitcher", {}).get("fullName", "")}
 
