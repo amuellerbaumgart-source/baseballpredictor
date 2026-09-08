@@ -26,7 +26,14 @@ def build_features(games: pd.DataFrame) -> pd.DataFrame:
     """Build simple pre-game features; rows must be chronologically ordered."""
     if games.empty:
         return pd.DataFrame(columns=ENHANCED_FEATURE_COLUMNS + ["game_pk", "home_win"])
-    frame = games.sort_values("game_date").copy()
+    frame = games.copy()
+    if "game_datetime" in frame:
+        event_time = pd.to_datetime(frame["game_datetime"], errors="coerce", utc=True)
+        fallback_time = pd.to_datetime(frame["game_date"], errors="coerce", utc=True)
+        frame["_sort_datetime"] = event_time.fillna(fallback_time)
+    else:
+        frame["_sort_datetime"] = pd.to_datetime(frame["game_date"], errors="coerce", utc=True)
+    frame = frame.sort_values(["_sort_datetime", "game_pk"], kind="mergesort").drop(columns="_sort_datetime")
     for col in ("home_score", "away_score"):
         frame[col] = pd.to_numeric(frame[col], errors="coerce").fillna(0)
     frame["home_runs_for"] = frame.groupby("home_team_id")["home_score"].transform(lambda s: s.shift().expanding().mean()).fillna(4.5)
@@ -72,8 +79,16 @@ def build_features(games: pd.DataFrame) -> pd.DataFrame:
     frame["home_advantage"] = 1.0
     frame["home_pitcher_known"] = frame["home_probable_pitcher_id"].notna().astype(float)
     frame["away_pitcher_known"] = frame["away_probable_pitcher_id"].notna().astype(float)
-    frame["home_pitcher_era"] = pd.to_numeric(frame["home_pitcher_era"] if "home_pitcher_era" in frame else pd.Series(4.20, index=frame.index), errors="coerce").fillna(4.20)
-    frame["away_pitcher_era"] = pd.to_numeric(frame["away_pitcher_era"] if "away_pitcher_era" in frame else pd.Series(4.20, index=frame.index), errors="coerce").fillna(4.20)
+    for side in ("home", "away"):
+        era = pd.to_numeric(frame[f"{side}_pitcher_era"], errors="coerce") if f"{side}_pitcher_era" in frame else pd.Series(float("nan"), index=frame.index)
+        if "game_datetime" in frame:
+            game_time = pd.to_datetime(frame["game_datetime"], errors="coerce", utc=True)
+        else:
+            game_time = pd.to_datetime(frame["game_date"], errors="coerce", utc=True)
+        as_of_values = frame.get(f"{side}_pitcher_era_as_of", pd.Series(pd.NaT, index=frame.index))
+        as_of = pd.to_datetime(as_of_values, errors="coerce", utc=True)
+        era = era.where(as_of.notna() & game_time.notna() & (as_of <= game_time))
+        frame[f"{side}_pitcher_era"] = era.fillna(4.20)
     for side in ("home", "away"):
         strength = pd.to_numeric(frame[f"{side}_lineup_strength"], errors="coerce") if f"{side}_lineup_strength" in frame else pd.Series(float("nan"), index=frame.index)
         lineup = frame[f"{side}_lineup"] if f"{side}_lineup" in frame else frame.get(f"{side}_lineup_json", pd.Series(index=frame.index, dtype=object))

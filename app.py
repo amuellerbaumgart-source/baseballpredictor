@@ -24,9 +24,10 @@ def feature_input(game):
     home_lineup = json.loads(game["home_lineup_json"] or "[]")
     away_lineup = json.loads(game["away_lineup_json"] or "[]")
     season = int(str(game["game_date"])[:4])
-    home_stats, away_stats = store.pitcher_stats(game["home_probable_pitcher_id"], season), store.pitcher_stats(game["away_probable_pitcher_id"], season)
+    game_time = game["game_datetime"] or f"{game['game_date']}T23:59:59Z"
+    home_stats, away_stats = store.pitcher_stats(game["home_probable_pitcher_id"], season, game_time), store.pitcher_stats(game["away_probable_pitcher_id"], season, game_time)
     candidate = dict(game)
-    candidate.update({"home_lineup": home_lineup, "away_lineup": away_lineup, "home_pitcher_era": home_stats["era"] if home_stats["available"] else 4.20, "away_pitcher_era": away_stats["era"] if away_stats["available"] else 4.20})
+    candidate.update({"home_lineup": home_lineup, "away_lineup": away_lineup, "home_pitcher_era": home_stats["era"] if home_stats["available"] else 4.20, "away_pitcher_era": away_stats["era"] if away_stats["available"] else 4.20, "home_pitcher_era_as_of": home_stats.get("as_of_datetime"), "away_pitcher_era_as_of": away_stats.get("as_of_datetime")})
     history = pd.DataFrame([dict(row) for row in store.completed_games()])
     features = build_prediction_features(candidate, history)
     features.update({"home_pitcher": game["home_pitcher_name"] or "", "away_pitcher": game["away_pitcher_name"] or "", "home_lineup": home_lineup, "away_lineup": away_lineup})

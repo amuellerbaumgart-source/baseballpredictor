@@ -90,6 +90,10 @@ The early model can predict without lineups. The enhanced model is selected only
 
 The app displays full team names, venue, city, venue-local time, team records, active streaks, probable pitchers, pitcher records, ERA, lineup status, and the selected model.
 
+## Leakage-prevention policy
+
+Historical features must use only information available before the scheduled game. Game rows are processed deterministically by `game_datetime` and then `game_pk`, so same-day doubleheaders have a stable order. Season statistics are stored with an `as_of_datetime` snapshot and are eligible only when that snapshot is no later than the game time. Unqualified full-season pitcher statistics are not joined into historical training rows; unavailable pregame statistics use the documented neutral fallback instead.
+
 ## Database and generated files
 
 Generated local files are intentionally excluded from Git:

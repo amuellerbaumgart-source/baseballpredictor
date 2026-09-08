@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS games (game_pk INTEGER PRIMARY KEY, game_date TEXT NO
 CREATE TABLE IF NOT EXISTS feature_snapshots (game_pk INTEGER PRIMARY KEY, created_at TEXT NOT NULL, feature_json TEXT NOT NULL, home_win INTEGER, model_version TEXT);
 CREATE TABLE IF NOT EXISTS predictions (game_pk INTEGER PRIMARY KEY, created_at TEXT NOT NULL, home_probability REAL NOT NULL, away_probability REAL NOT NULL, model_version TEXT NOT NULL, explanation TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS pitcher_season_stats (pitcher_id INTEGER NOT NULL, season INTEGER NOT NULL, era REAL, wins INTEGER NOT NULL DEFAULT 0, losses INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL, PRIMARY KEY (pitcher_id, season));
+CREATE TABLE IF NOT EXISTS pitcher_stat_snapshots (pitcher_id INTEGER NOT NULL, season INTEGER NOT NULL, as_of_datetime TEXT NOT NULL, era REAL, wins INTEGER NOT NULL DEFAULT 0, losses INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (pitcher_id, season, as_of_datetime));
 """
 
 
@@ -69,17 +70,24 @@ class Store:
         return int(row[0]) if row and row[0] else datetime.now(timezone.utc).year
 
     def upsert_pitcher_stats(self, stats: dict) -> None:
+        as_of_datetime = stats.get("as_of_datetime") or datetime.now(timezone.utc).isoformat()
         with self.connect() as db:
             db.execute("INSERT INTO pitcher_season_stats(pitcher_id, season, era, wins, losses, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(pitcher_id, season) DO UPDATE SET era=excluded.era, wins=excluded.wins, losses=excluded.losses, updated_at=excluded.updated_at", (stats["pitcher_id"], stats["season"], stats.get("era"), stats.get("wins", 0), stats.get("losses", 0), datetime.now(timezone.utc).isoformat()))
+            db.execute("INSERT INTO pitcher_stat_snapshots(pitcher_id, season, as_of_datetime, era, wins, losses) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(pitcher_id, season, as_of_datetime) DO UPDATE SET era=excluded.era, wins=excluded.wins, losses=excluded.losses", (stats["pitcher_id"], stats["season"], as_of_datetime, stats.get("era"), stats.get("wins", 0), stats.get("losses", 0)))
 
-    def pitcher_stats(self, pitcher_id: int | None, season: int | None = None) -> dict:
+    def pitcher_stats(self, pitcher_id: int | None, season: int | None = None, as_of_datetime: str | None = None) -> dict:
         if not pitcher_id: return {"era": None, "wins": 0, "losses": 0, "available": False}
         season = season or datetime.now(timezone.utc).year
         with self.connect() as db:
-            row = db.execute("SELECT era, wins, losses FROM pitcher_season_stats WHERE pitcher_id=? AND season=?", (pitcher_id, season)).fetchone()
+            if as_of_datetime is None:
+                row = db.execute("SELECT era, wins, losses, as_of_datetime FROM pitcher_stat_snapshots WHERE pitcher_id=? AND season=? ORDER BY as_of_datetime DESC LIMIT 1", (pitcher_id, season)).fetchone()
+            else:
+                row = db.execute("SELECT era, wins, losses, as_of_datetime FROM pitcher_stat_snapshots WHERE pitcher_id=? AND season=? AND as_of_datetime <= ? ORDER BY as_of_datetime DESC LIMIT 1", (pitcher_id, season, as_of_datetime)).fetchone()
+            if row is None and as_of_datetime is None:
+                row = db.execute("SELECT era, wins, losses, NULL AS as_of_datetime FROM pitcher_season_stats WHERE pitcher_id=? AND season=?", (pitcher_id, season)).fetchone()
         if row is None:
             return {"era": None, "wins": 0, "losses": 0, "available": False}
-        return {"era": row["era"], "wins": row["wins"], "losses": row["losses"], "available": row["era"] is not None}
+        return {"era": row["era"], "wins": row["wins"], "losses": row["losses"], "as_of_datetime": row["as_of_datetime"], "available": row["era"] is not None}
 
     def upcoming_games(self, limit: int = 100, start_date: date | None = None):
         with self.connect() as db:
@@ -94,7 +102,7 @@ class Store:
 
     def completed_games(self):
         with self.connect() as db:
-            return db.execute("SELECT games.*, hs.era AS home_pitcher_era, hs.wins AS home_pitcher_stat_wins, hs.losses AS home_pitcher_stat_losses, aws.era AS away_pitcher_era, aws.wins AS away_pitcher_stat_wins, aws.losses AS away_pitcher_stat_losses FROM games LEFT JOIN pitcher_season_stats hs ON hs.pitcher_id=games.home_probable_pitcher_id AND hs.season=substr(games.game_date,1,4) LEFT JOIN pitcher_season_stats aws ON aws.pitcher_id=games.away_probable_pitcher_id AND aws.season=substr(games.game_date,1,4) WHERE status = 'Final' AND game_type = 'R' AND home_score IS NOT NULL AND away_score IS NOT NULL ORDER BY game_date").fetchall()
+            return db.execute("SELECT * FROM games WHERE status = 'Final' AND game_type = 'R' AND home_score IS NOT NULL AND away_score IS NOT NULL ORDER BY COALESCE(game_datetime, game_date), game_pk").fetchall()
 
     def count_games(self) -> int:
         with self.connect() as db:
@@ -108,7 +116,7 @@ class Store:
         """Return a season-to-date record and active streak."""
         season = season or datetime.now(timezone.utc).year
         with self.connect() as db:
-            games = db.execute("SELECT home_team_id, away_team_id, home_score, away_score FROM games WHERE status = 'Final' AND (game_type = 'R' OR (game_type IS NULL AND substr(game_date, 6, 2) >= '04')) AND home_score IS NOT NULL AND away_score IS NOT NULL AND substr(game_date, 1, 4) = ? ORDER BY game_date, game_datetime", (str(season),)).fetchall()
+            games = db.execute("SELECT home_team_id, away_team_id, home_score, away_score FROM games WHERE status = 'Final' AND (game_type = 'R' OR (game_type IS NULL AND substr(game_date, 6, 2) >= '04')) AND home_score IS NOT NULL AND away_score IS NOT NULL AND substr(game_date, 1, 4) = ? ORDER BY COALESCE(game_datetime, game_date), game_pk", (str(season),)).fetchall()
         wins = losses = streak = 0
         for game in games:
             if game["home_team_id"] != team_id and game["away_team_id"] != team_id: continue
@@ -125,7 +133,7 @@ class Store:
         if not pitcher_id:
             return {"wins": 0, "losses": 0, "streak": 0, "available": False}
         with self.connect() as db:
-            games = db.execute("SELECT home_probable_pitcher_id, away_probable_pitcher_id, home_score, away_score FROM games WHERE status = 'Final' AND (game_type = 'R' OR (game_type IS NULL AND substr(game_date, 6, 2) >= '04')) AND home_score IS NOT NULL AND away_score IS NOT NULL AND substr(game_date, 1, 4) = ? AND (home_probable_pitcher_id = ? OR away_probable_pitcher_id = ?) ORDER BY game_date, game_datetime", (str(season), pitcher_id, pitcher_id)).fetchall()
+            games = db.execute("SELECT home_probable_pitcher_id, away_probable_pitcher_id, home_score, away_score FROM games WHERE status = 'Final' AND (game_type = 'R' OR (game_type IS NULL AND substr(game_date, 6, 2) >= '04')) AND home_score IS NOT NULL AND away_score IS NOT NULL AND substr(game_date, 1, 4) = ? AND (home_probable_pitcher_id = ? OR away_probable_pitcher_id = ?) ORDER BY COALESCE(game_datetime, game_date), game_pk", (str(season), pitcher_id, pitcher_id)).fetchall()
         wins = losses = streak = 0
         for game in games:
             home = game["home_probable_pitcher_id"] == pitcher_id
