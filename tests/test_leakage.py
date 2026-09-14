@@ -42,4 +42,5 @@ def test_completed_games_do_not_join_unqualified_season_pitcher_stats(tmp_path):
 
     row = store.completed_games()[0]
 
-    assert "home_pitcher_era" not in row.keys()
+    assert row["home_pitcher_era"] is None
+    assert row["home_pitcher_era_as_of"] is None
