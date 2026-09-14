@@ -142,19 +142,19 @@ class Store:
                     (SELECT 9.0 * SUM(p.earned_runs) / NULLIF(SUM(p.outs_pitched), 0)
                      FROM pitcher_game_stats p
                      WHERE p.pitcher_id = games.home_probable_pitcher_id
-                       AND p.game_datetime < COALESCE(games.game_datetime, games.game_date || 'T23:59:59Z')) AS home_pitcher_era,
+                       AND p.game_datetime < COALESCE(games.game_datetime, games.game_date || 'T00:00:00Z')) AS home_pitcher_era,
                     (SELECT MAX(p.game_datetime)
                      FROM pitcher_game_stats p
                      WHERE p.pitcher_id = games.home_probable_pitcher_id
-                       AND p.game_datetime < COALESCE(games.game_datetime, games.game_date || 'T23:59:59Z')) AS home_pitcher_era_as_of,
+                       AND p.game_datetime < COALESCE(games.game_datetime, games.game_date || 'T00:00:00Z')) AS home_pitcher_era_as_of,
                     (SELECT 9.0 * SUM(p.earned_runs) / NULLIF(SUM(p.outs_pitched), 0)
                      FROM pitcher_game_stats p
                      WHERE p.pitcher_id = games.away_probable_pitcher_id
-                       AND p.game_datetime < COALESCE(games.game_datetime, games.game_date || 'T23:59:59Z')) AS away_pitcher_era,
+                       AND p.game_datetime < COALESCE(games.game_datetime, games.game_date || 'T00:00:00Z')) AS away_pitcher_era,
                     (SELECT MAX(p.game_datetime)
                      FROM pitcher_game_stats p
                      WHERE p.pitcher_id = games.away_probable_pitcher_id
-                       AND p.game_datetime < COALESCE(games.game_datetime, games.game_date || 'T23:59:59Z')) AS away_pitcher_era_as_of
+                       AND p.game_datetime < COALESCE(games.game_datetime, games.game_date || 'T00:00:00Z')) AS away_pitcher_era_as_of
                 FROM games
                 WHERE status = 'Final' AND game_type = 'R'
                   AND home_score IS NOT NULL AND away_score IS NOT NULL

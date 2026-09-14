@@ -44,3 +44,17 @@ def test_completed_games_do_not_join_unqualified_season_pitcher_stats(tmp_path):
 
     assert row["home_pitcher_era"] is None
     assert row["home_pitcher_era_as_of"] is None
+
+
+def test_completed_game_without_time_excludes_same_day_pitcher_appearance(tmp_path):
+    store = Store(str(tmp_path / "mlb.sqlite"))
+    store.upsert_games([
+        {"gamePk": 1, "officialDate": "2026-04-01", "gameDate": None, "status": {"abstractGameState": "Final"}, "gameType": "R", "teams": {"home": {"team": {"id": 1}, "score": 5, "probablePitcher": {"id": 10}}, "away": {"team": {"id": 2}, "score": 3, "probablePitcher": {"id": 20}}}},
+    ])
+    store.upsert_game_details(1, {"home_lineup": [], "away_lineup": [], "pitcher_game_stats": []})
+    with store.connect() as db:
+        db.execute("INSERT INTO pitcher_game_stats(game_pk, pitcher_id, game_datetime, outs_pitched, earned_runs) VALUES (?, ?, ?, ?, ?)", (99, 10, "2026-04-01T19:00:00Z", 18, 0))
+
+    row = store.completed_games()[0]
+
+    assert row["home_pitcher_era"] is None

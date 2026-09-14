@@ -50,9 +50,13 @@ def main() -> None:
         print(f"Fetched details for {count} completed games.")
         return
     rows = [dict(row) for row in store.completed_games()]
-    features = build_features(pd.DataFrame(rows))
+    source_frame = pd.DataFrame(rows)
+    features = build_features(source_frame)
     if args.action == "evaluate":
         result = evaluate_walk_forward(features, EARLY_FEATURE_COLUMNS)
+        baseline_frame = source_frame[["game_pk", "game_date", "game_datetime", "home_team_id", "away_team_id"]].merge(
+            features[["game_pk", "home_win"]], on="game_pk", how="inner"
+        )
         output = {
             "walk_forward_model": result.metrics.to_dict(),
             "calibration": calibration_table(
@@ -61,7 +65,7 @@ def main() -> None:
             "by_season": {season: metrics.to_dict() for season, metrics in metrics_by_season(result.predictions).items()},
         }
         output["baselines"] = {
-            name: benchmark.metrics.to_dict() for name, benchmark in evaluate_baselines(features, test_start=30).items()
+            name: benchmark.metrics.to_dict() for name, benchmark in evaluate_baselines(baseline_frame, test_start=30).items()
         }
         print(output)
         return
