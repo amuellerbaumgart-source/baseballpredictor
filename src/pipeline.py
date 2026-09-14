@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import pandas as pd
 
@@ -30,7 +30,7 @@ def main() -> None:
     args = parser.parse_args()
     store = Store()
     if args.action == "refresh":
-        today = datetime.now(UTC).date()
+        today = datetime.now(timezone.utc).date()  # noqa: UP017
         client = MLBClient()
         refresh_teams(store, client)
         refresh_games(store, client, today, today + timedelta(days=args.days))
@@ -38,7 +38,7 @@ def main() -> None:
         print(f"Refreshed upcoming schedule and cached {count} pitcher stat records.")
         return
     if args.action == "backfill":
-        today = datetime.now(UTC).date()
+        today = datetime.now(timezone.utc).date()  # noqa: UP017
         client = MLBClient()
         refresh_teams(store, client)
         start = date(today.year - 3, 1, 1)
@@ -53,10 +53,13 @@ def main() -> None:
     source_frame = pd.DataFrame(rows)
     features = build_features(source_frame)
     if args.action == "evaluate":
-        result = evaluate_walk_forward(features, EARLY_FEATURE_COLUMNS)
         baseline_frame = source_frame[["game_pk", "game_date", "game_datetime", "home_team_id", "away_team_id"]].merge(
             features[["game_pk", "home_win"]], on="game_pk", how="inner"
         )
+        evaluation_frame = source_frame[["game_pk", "game_date", "game_datetime"]].merge(
+            features, on=["game_pk"], how="inner", suffixes=("_source", "")
+        )
+        result = evaluate_walk_forward(evaluation_frame, EARLY_FEATURE_COLUMNS)
         output = {
             "walk_forward_model": result.metrics.to_dict(),
             "calibration": calibration_table(

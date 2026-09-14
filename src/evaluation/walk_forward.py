@@ -4,9 +4,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pandas as pd
-from sklearn.linear_model import LogisticRegression
-from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import StandardScaler
+
+from src.models.estimator import build_calibrated_estimator
 
 from .metrics import Evaluation, evaluate_probabilities
 
@@ -41,7 +40,7 @@ def evaluate_walk_forward(
         train = eligible.iloc[:test_index]
         if train["home_win"].nunique() < 2:
             continue
-        model = make_pipeline(StandardScaler(), LogisticRegression(max_iter=1000, random_state=42))
+        model = build_calibrated_estimator(test_index)
         model.fit(train[features], train["home_win"].astype(int))
         probability = float(model.predict_proba(eligible.iloc[[test_index]][features])[0, 1])
         row = eligible.iloc[test_index]

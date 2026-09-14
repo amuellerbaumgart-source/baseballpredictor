@@ -1,4 +1,5 @@
 import pandas as pd
+import pytest
 
 from src.evaluation.metrics import evaluate_probabilities
 
@@ -17,3 +18,8 @@ def test_evaluation_returns_probability_metrics():
     assert result.log_loss < 1
     assert result.brier_score < 0.1
     assert result.roc_auc == 1.0
+
+
+def test_evaluation_rejects_invalid_probability_inputs():
+    with pytest.raises(ValueError, match="probabilities must be between"):
+        evaluate_probabilities(pd.Series([0, 1]), [0.2, 1.2])

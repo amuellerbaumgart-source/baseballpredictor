@@ -22,6 +22,12 @@ def test_calibration_table_reports_observed_rate_and_gap():
     assert (table["calibration_gap"] >= 0).all()
 
 
+def test_calibration_table_uses_fixed_probability_range():
+    table = calibration_table(pd.Series([0, 1]), [0.49, 0.51], bins=10)
+
+    assert table["probability_bin"].tolist() == [4, 5]
+
+
 def test_metrics_by_season_uses_prediction_dates():
     metrics = metrics_by_season(_predictions())
 
