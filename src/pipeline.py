@@ -15,6 +15,7 @@ from src.data.ingest import (
 )
 from src.data.mlb_api import MLBClient
 from src.data.store import Store
+from src.evaluation.baselines import evaluate_baselines
 from src.evaluation.walk_forward import evaluate_walk_forward
 from src.models.features import EARLY_FEATURE_COLUMNS, build_features
 from src.models.trainer import train_models
@@ -51,7 +52,9 @@ def main() -> None:
     features = build_features(pd.DataFrame(rows))
     if args.action == "evaluate":
         result = evaluate_walk_forward(features, EARLY_FEATURE_COLUMNS)
-        print(result.metrics.to_dict())
+        output = {"walk_forward_model": result.metrics.to_dict()}
+        output["baselines"] = {name: benchmark.metrics.to_dict() for name, benchmark in evaluate_baselines(features).items()}
+        print(output)
         return
     metrics = train_models(features)
     print(metrics)
