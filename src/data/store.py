@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS feature_snapshots (game_pk INTEGER PRIMARY KEY, creat
 CREATE TABLE IF NOT EXISTS predictions (game_pk INTEGER PRIMARY KEY, created_at TEXT NOT NULL, home_probability REAL NOT NULL, away_probability REAL NOT NULL, model_version TEXT NOT NULL, explanation TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS pitcher_season_stats (pitcher_id INTEGER NOT NULL, season INTEGER NOT NULL, era REAL, wins INTEGER NOT NULL DEFAULT 0, losses INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL, PRIMARY KEY (pitcher_id, season));
 CREATE TABLE IF NOT EXISTS pitcher_stat_snapshots (pitcher_id INTEGER NOT NULL, season INTEGER NOT NULL, as_of_datetime TEXT NOT NULL, era REAL, wins INTEGER NOT NULL DEFAULT 0, losses INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (pitcher_id, season, as_of_datetime));
+CREATE TABLE IF NOT EXISTS pitcher_game_stats (game_pk INTEGER NOT NULL, pitcher_id INTEGER NOT NULL, game_datetime TEXT NOT NULL, outs_pitched INTEGER NOT NULL, earned_runs INTEGER NOT NULL, PRIMARY KEY (game_pk, pitcher_id));
 """
 
 
@@ -64,11 +65,23 @@ class Store:
             home, away = details.get("home_lineup", []), details.get("away_lineup", [])
             status = "Confirmed" if len(home) >= 9 and len(away) >= 9 else "Partial" if home or away else "Not available"
             db.execute("UPDATE games SET home_probable_pitcher_id=COALESCE(?, home_probable_pitcher_id), away_probable_pitcher_id=COALESCE(?, away_probable_pitcher_id), home_pitcher_name=COALESCE(NULLIF(?, ''), home_pitcher_name), away_pitcher_name=COALESCE(NULLIF(?, ''), away_pitcher_name), home_lineup_json=?, away_lineup_json=?, lineup_status=?, updated_at=? WHERE game_pk=?", (details.get("home_pitcher_id"), details.get("away_pitcher_id"), details.get("home_pitcher_name", ""), details.get("away_pitcher_name", ""), json.dumps(home), json.dumps(away), status, datetime.now(timezone.utc).isoformat(), game_pk))
+            game = db.execute("SELECT game_datetime FROM games WHERE game_pk=?", (game_pk,)).fetchone()
+            game_datetime = game[0] if game and game[0] else ""
+            if game_datetime:
+                db.executemany(
+                    "INSERT INTO pitcher_game_stats(game_pk, pitcher_id, game_datetime, outs_pitched, earned_runs) VALUES (?, ?, ?, ?, ?) ON CONFLICT(game_pk, pitcher_id) DO UPDATE SET game_datetime=excluded.game_datetime, outs_pitched=excluded.outs_pitched, earned_runs=excluded.earned_runs",
+                    [(game_pk, stat["pitcher_id"], game_datetime, stat["innings_pitched"], stat["earned_runs"]) for stat in details.get("pitcher_game_stats", [])],
+                )
 
     def game_season(self, game_pk: int) -> int:
         with self.connect() as db:
             row = db.execute("SELECT substr(game_date, 1, 4) FROM games WHERE game_pk=?", (game_pk,)).fetchone()
         return int(row[0]) if row and row[0] else datetime.now(timezone.utc).year
+
+    def game_datetime(self, game_pk: int) -> str | None:
+        with self.connect() as db:
+            row = db.execute("SELECT game_datetime FROM games WHERE game_pk=?", (game_pk,)).fetchone()
+        return row[0] if row else None
 
     def upsert_pitcher_stats(self, stats: dict) -> None:
         as_of_datetime = stats.get("as_of_datetime") or datetime.now(timezone.utc).isoformat()
@@ -124,7 +137,29 @@ class Store:
 
     def completed_games(self):
         with self.connect() as db:
-            return db.execute("SELECT * FROM games WHERE status = 'Final' AND game_type = 'R' AND home_score IS NOT NULL AND away_score IS NOT NULL ORDER BY COALESCE(game_datetime, game_date), game_pk").fetchall()
+            return db.execute("""
+                SELECT games.*,
+                    (SELECT 9.0 * SUM(p.earned_runs) / NULLIF(SUM(p.outs_pitched), 0)
+                     FROM pitcher_game_stats p
+                     WHERE p.pitcher_id = games.home_probable_pitcher_id
+                       AND p.game_datetime < COALESCE(games.game_datetime, games.game_date || 'T23:59:59Z')) AS home_pitcher_era,
+                    (SELECT MAX(p.game_datetime)
+                     FROM pitcher_game_stats p
+                     WHERE p.pitcher_id = games.home_probable_pitcher_id
+                       AND p.game_datetime < COALESCE(games.game_datetime, games.game_date || 'T23:59:59Z')) AS home_pitcher_era_as_of,
+                    (SELECT 9.0 * SUM(p.earned_runs) / NULLIF(SUM(p.outs_pitched), 0)
+                     FROM pitcher_game_stats p
+                     WHERE p.pitcher_id = games.away_probable_pitcher_id
+                       AND p.game_datetime < COALESCE(games.game_datetime, games.game_date || 'T23:59:59Z')) AS away_pitcher_era,
+                    (SELECT MAX(p.game_datetime)
+                     FROM pitcher_game_stats p
+                     WHERE p.pitcher_id = games.away_probable_pitcher_id
+                       AND p.game_datetime < COALESCE(games.game_datetime, games.game_date || 'T23:59:59Z')) AS away_pitcher_era_as_of
+                FROM games
+                WHERE status = 'Final' AND game_type = 'R'
+                  AND home_score IS NOT NULL AND away_score IS NOT NULL
+                ORDER BY COALESCE(game_datetime, game_date), game_pk
+            """).fetchall()
 
     def count_games(self) -> int:
         with self.connect() as db:

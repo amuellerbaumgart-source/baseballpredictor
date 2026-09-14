@@ -81,19 +81,37 @@ class MLBClient:
         return self._get(f"game/{game_pk}/feed/live", base_url=self.live_base_url)
 
     @staticmethod
+    def innings_to_outs(innings_pitched: Any) -> int:
+        """Convert MLB's innings notation (for example, 6.2) to outs."""
+        whole, _, partial = str(innings_pitched).partition(".")
+        if partial not in ("", "0", "1", "2"):
+            raise ValueError(f"Invalid innings pitched value: {innings_pitched}")
+        return int(whole) * 3 + int(partial or 0)
+
+    @staticmethod
     def extract_game_details(feed: dict[str, Any]) -> dict[str, Any]:
         """Extract probable pitchers and batting order from a live game feed."""
         game_data = feed.get("gameData", {})
         probable = game_data.get("probablePitchers", {})
         live_teams = feed.get("liveData", {}).get("boxscore", {}).get("teams", {})
-        details = {"home_pitcher_id": probable.get("home", {}).get("id"), "away_pitcher_id": probable.get("away", {}).get("id"), "home_pitcher_name": probable.get("home", {}).get("fullName", ""), "away_pitcher_name": probable.get("away", {}).get("fullName", ""), "home_lineup": [], "away_lineup": []}
+        details = {"home_pitcher_id": probable.get("home", {}).get("id"), "away_pitcher_id": probable.get("away", {}).get("id"), "home_pitcher_name": probable.get("home", {}).get("fullName", ""), "away_pitcher_name": probable.get("away", {}).get("fullName", ""), "home_lineup": [], "away_lineup": [], "pitcher_game_stats": []}
         for side in ("home", "away"):
             players = live_teams.get(side, {}).get("players", {})
             ordered = []
             for player in players.values():
                 order = player.get("battingOrder")
                 if order is not None:
-                    ordered.append((int(order), player.get("person", {}).get("fullName", "")))
+                    try:
+                        ordered.append((int(order), player.get("person", {}).get("fullName", "")))
+                    except (TypeError, ValueError):
+                        continue
+                pitching = player.get("stats", {}).get("pitching", {})
+                person = player.get("person", {})
+                if pitching.get("inningsPitched") is not None and pitching.get("earnedRuns") is not None and person.get("id") is not None:
+                    try:
+                        details["pitcher_game_stats"].append({"pitcher_id": int(person["id"]), "innings_pitched": MLBClient.innings_to_outs(pitching["inningsPitched"]), "earned_runs": int(pitching["earnedRuns"])})
+                    except (TypeError, ValueError):
+                        continue
             details[f"{side}_lineup"] = [name for _, name in sorted(ordered) if name]
         return details
 

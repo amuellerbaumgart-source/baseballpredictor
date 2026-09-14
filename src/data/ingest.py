@@ -21,6 +21,7 @@ def refresh_teams(store: Store, client: MLBClient) -> int:
 
 def refresh_game_details(store: Store, client: MLBClient, game_pk: int) -> None:
     details = client.extract_game_details(client.game_feed(game_pk))
+    details["game_datetime"] = store.game_datetime(game_pk)
     store.upsert_game_details(game_pk, details)
     season = store.game_season(game_pk)
     for pitcher_id in (details.get("home_pitcher_id"), details.get("away_pitcher_id")):

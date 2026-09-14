@@ -98,6 +98,8 @@ Each generated forecast stores the feature values, model version, probabilities,
 
 Historical features must use only information available before the scheduled game. Game rows are processed deterministically by `game_datetime` and then `game_pk`, so same-day doubleheaders have a stable order. Season statistics are stored with an `as_of_datetime` snapshot and are eligible only when that snapshot is no later than the game time. Unqualified full-season pitcher statistics are not joined into historical training rows; unavailable pregame statistics use the documented neutral fallback instead.
 
+When completed-game feeds are available, pitcher game logs are stored as outs pitched and earned runs. Historical ERA is calculated cumulatively from prior appearances only; the current game is never included in its own features.
+
 Model artifacts include their feature list, training/test row counts, model version, and evaluation metrics. ROC-AUC is reported as unavailable when a validation split contains only one class.
 
 ## Database and generated files
