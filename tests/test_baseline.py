@@ -1,5 +1,7 @@
 import pytest
+
 from src.models.baseline import predict_game
+
 
 def test_probabilities_are_complements():
     result = predict_game("LAD", "NYY")

@@ -23,7 +23,7 @@ def _lineup_count(value) -> float:
 
 
 def build_features(games: pd.DataFrame) -> pd.DataFrame:
-    """Build simple pre-game features; rows must be chronologically ordered."""
+    """Build simple pre-game features; lineup strength is currently player count."""
     if games.empty:
         return pd.DataFrame(columns=ENHANCED_FEATURE_COLUMNS + ["game_pk", "home_win"])
     frame = games.copy()

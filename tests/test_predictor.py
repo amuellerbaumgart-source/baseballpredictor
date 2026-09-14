@@ -3,7 +3,6 @@ import pytest
 
 from src.models.predictor import predict_with_model
 
-
 FEATURES = {"lineup_complete": 0}
 
 

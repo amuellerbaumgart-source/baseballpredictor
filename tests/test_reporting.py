@@ -34,3 +34,8 @@ def test_metrics_by_season_uses_prediction_dates():
     assert set(metrics) == {"2025", "2026"}
     assert metrics["2025"].n_samples == 2
     assert metrics["2026"].accuracy == pytest.approx(1.0)
+
+
+def test_metrics_by_season_rejects_missing_seasons():
+    with pytest.raises(ValueError, match="valid season"):
+        metrics_by_season(pd.DataFrame({"actual_home_win": [1], "home_probability": [0.6], "game_date": ["invalid"]}))

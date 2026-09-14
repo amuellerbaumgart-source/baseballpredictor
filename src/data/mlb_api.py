@@ -1,10 +1,9 @@
 """Small, defensive client for MLB's StatsAPI."""
 from __future__ import annotations
 
-from datetime import date, timedelta
-from datetime import datetime
-from zoneinfo import ZoneInfo
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -16,9 +15,9 @@ def format_pacific_time(game_datetime: str | None, fallback: str = "") -> str:
     if not game_datetime:
         return fallback
     try:
-        timestamp = datetime.fromisoformat(game_datetime.replace("Z", "+00:00"))
+        timestamp = datetime.fromisoformat(game_datetime.replace("Z", "+00:00"))  # noqa: FURB162
         if timestamp.tzinfo is None:
-            timestamp = timestamp.replace(tzinfo=ZoneInfo("UTC"))
+            timestamp = timestamp.replace(tzinfo=timezone.utc)  # noqa: UP017
         return timestamp.astimezone(PACIFIC_TIMEZONE).strftime("%Y-%m-%d %I:%M %p PT")
     except (AttributeError, TypeError, ValueError):
         return fallback or game_datetime
@@ -72,7 +71,7 @@ class MLBClient:
         local_time = ""
         if scheduled:
             try:
-                local_time = datetime.fromisoformat(scheduled.replace("Z", "+00:00")).astimezone(ZoneInfo(timezone)).isoformat()
+                local_time = datetime.fromisoformat(scheduled.replace("Z", "+00:00")).astimezone(ZoneInfo(timezone)).isoformat()  # noqa: FURB162
             except (ValueError, KeyError, TypeError):
                 local_time = scheduled
         return {"game_pk": game.get("gamePk"), "game_date": game.get("officialDate", ""), "game_datetime": scheduled, "scheduled_local_time": local_time, "game_type": game.get("gameType", "R"), "status": game.get("status", {}).get("abstractGameState", "Unknown"), "status_detail": game.get("status", {}).get("detailedState", ""), "home_team_id": home.get("team", {}).get("id"), "away_team_id": away.get("team", {}).get("id"), "home_team_code": home.get("team", {}).get("abbreviation", ""), "away_team_code": away.get("team", {}).get("abbreviation", ""), "home_team_name": home.get("team", {}).get("name", "Home team"), "away_team_name": away.get("team", {}).get("name", "Away team"), "home_score": home.get("score"), "away_score": away.get("score"), "venue_name": venue.get("name", ""), "venue_city": venue.get("location", {}).get("city", ""), "venue_timezone": timezone, "home_probable_pitcher_id": home.get("probablePitcher", {}).get("id"), "away_probable_pitcher_id": away.get("probablePitcher", {}).get("id"), "home_pitcher_name": home.get("probablePitcher", {}).get("fullName", ""), "away_pitcher_name": away.get("probablePitcher", {}).get("fullName", "")}
@@ -116,7 +115,7 @@ class MLBClient:
         return details
 
     def person_stats(self, person_id: int, season: int) -> dict[str, Any]:
-        return self._get(f"people/{person_id}/stats", stats=",".join(["season"]), group="hitting,pitching", season=season)
+        return self._get(f"people/{person_id}/stats", stats="season", group="hitting,pitching", season=season)
 
     def pitcher_season_stats(self, person_id: int, season: int) -> dict[str, Any]:
         payload = self._get(f"people/{person_id}/stats", stats="season", group="pitching", season=season)
@@ -131,5 +130,5 @@ class MLBClient:
         return self._get(f"teams/{team_id}/stats", stats="season", group="hitting,pitching", season=season)
 
     def recent_dates(self, seasons: int = 3) -> tuple[date, date]:
-        end = date.today()
+        end = datetime.now(timezone.utc).date()  # noqa: UP017
         return end - timedelta(days=365 * seasons), end

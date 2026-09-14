@@ -1,7 +1,7 @@
 """Small, deterministic baseline for early application development."""
+from collections.abc import Sequence
 from dataclasses import dataclass
 from math import exp
-from typing import Sequence
 
 MLB_TEAMS = ["ARI", "ATL", "BAL", "BOS", "CHC", "CIN", "CLE", "COL", "DET", "HOU", "KC", "LAA", "LAD", "MIA", "MIL", "MIN", "NYM", "NYY", "OAK", "PHI", "PIT", "SD", "SEA", "SF", "STL", "TB", "TEX", "TOR", "WAS", "ATH"]
 TEAM_RATINGS = {team: 1500.0 for team in MLB_TEAMS}

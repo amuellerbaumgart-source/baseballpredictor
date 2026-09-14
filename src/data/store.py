@@ -1,13 +1,14 @@
 """SQLite persistence for normalized games and prediction snapshots."""
 from __future__ import annotations
 
-import sqlite3
 import json
 import math
+import sqlite3
+from collections.abc import Iterable
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Iterable
 
+UTC_ZONE = timezone.utc  # noqa: UP017
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS teams (team_id INTEGER PRIMARY KEY, code TEXT UNIQUE NOT NULL, name TEXT NOT NULL);
@@ -55,7 +56,7 @@ class Store:
             if "game_pk" not in game:
                 from .mlb_api import MLBClient
                 item = MLBClient.normalize_game(game)
-            rows.append(tuple(item.get(key) for key in ("game_pk", "game_date", "game_datetime", "scheduled_local_time", "game_type", "status", "status_detail", "home_team_id", "away_team_id", "home_team_code", "away_team_code", "home_team_name", "away_team_name", "home_score", "away_score", "venue_name", "venue_city", "venue_timezone", "home_probable_pitcher_id", "away_probable_pitcher_id", "home_pitcher_name", "away_pitcher_name")) + ("[]", "[]", "Not available", datetime.now(timezone.utc).isoformat()))
+            rows.append(tuple(item.get(key) for key in ("game_pk", "game_date", "game_datetime", "scheduled_local_time", "game_type", "status", "status_detail", "home_team_id", "away_team_id", "home_team_code", "away_team_code", "home_team_name", "away_team_name", "home_score", "away_score", "venue_name", "venue_city", "venue_timezone", "home_probable_pitcher_id", "away_probable_pitcher_id", "home_pitcher_name", "away_pitcher_name")) + ("[]", "[]", "Not available", datetime.now(UTC_ZONE).isoformat()))
         with self.connect() as db:
             columns = "game_pk,game_date,game_datetime,scheduled_local_time,game_type,status,status_detail,home_team_id,away_team_id,home_team_code,away_team_code,home_team_name,away_team_name,home_score,away_score,venue_name,venue_city,venue_timezone,home_probable_pitcher_id,away_probable_pitcher_id,home_pitcher_name,away_pitcher_name,home_lineup_json,away_lineup_json,lineup_status,updated_at"
             db.executemany(f"INSERT INTO games({columns}) VALUES ({','.join('?' for _ in range(26) )}) ON CONFLICT(game_pk) DO UPDATE SET game_date=excluded.game_date,game_datetime=excluded.game_datetime,scheduled_local_time=excluded.scheduled_local_time,game_type=excluded.game_type,status=excluded.status,status_detail=excluded.status_detail,home_team_id=excluded.home_team_id,away_team_id=excluded.away_team_id,home_team_code=excluded.home_team_code,away_team_code=excluded.away_team_code,home_team_name=excluded.home_team_name,away_team_name=excluded.away_team_name,home_score=excluded.home_score,away_score=excluded.away_score,venue_name=excluded.venue_name,venue_city=excluded.venue_city,venue_timezone=excluded.venue_timezone,home_probable_pitcher_id=COALESCE(excluded.home_probable_pitcher_id,games.home_probable_pitcher_id),away_probable_pitcher_id=COALESCE(excluded.away_probable_pitcher_id,games.away_probable_pitcher_id),home_pitcher_name=COALESCE(NULLIF(excluded.home_pitcher_name,''),games.home_pitcher_name),away_pitcher_name=COALESCE(NULLIF(excluded.away_pitcher_name,''),games.away_pitcher_name),updated_at=excluded.updated_at", rows)
@@ -64,7 +65,7 @@ class Store:
         with self.connect() as db:
             home, away = details.get("home_lineup", []), details.get("away_lineup", [])
             status = "Confirmed" if len(home) >= 9 and len(away) >= 9 else "Partial" if home or away else "Not available"
-            db.execute("UPDATE games SET home_probable_pitcher_id=COALESCE(?, home_probable_pitcher_id), away_probable_pitcher_id=COALESCE(?, away_probable_pitcher_id), home_pitcher_name=COALESCE(NULLIF(?, ''), home_pitcher_name), away_pitcher_name=COALESCE(NULLIF(?, ''), away_pitcher_name), home_lineup_json=?, away_lineup_json=?, lineup_status=?, updated_at=? WHERE game_pk=?", (details.get("home_pitcher_id"), details.get("away_pitcher_id"), details.get("home_pitcher_name", ""), details.get("away_pitcher_name", ""), json.dumps(home), json.dumps(away), status, datetime.now(timezone.utc).isoformat(), game_pk))
+            db.execute("UPDATE games SET home_probable_pitcher_id=COALESCE(?, home_probable_pitcher_id), away_probable_pitcher_id=COALESCE(?, away_probable_pitcher_id), home_pitcher_name=COALESCE(NULLIF(?, ''), home_pitcher_name), away_pitcher_name=COALESCE(NULLIF(?, ''), away_pitcher_name), home_lineup_json=?, away_lineup_json=?, lineup_status=?, updated_at=? WHERE game_pk=?", (details.get("home_pitcher_id"), details.get("away_pitcher_id"), details.get("home_pitcher_name", ""), details.get("away_pitcher_name", ""), json.dumps(home), json.dumps(away), status, datetime.now(UTC_ZONE).isoformat(), game_pk))
             game = db.execute("SELECT game_datetime FROM games WHERE game_pk=?", (game_pk,)).fetchone()
             game_datetime = game[0] if game and game[0] else ""
             if game_datetime:
@@ -76,7 +77,7 @@ class Store:
     def game_season(self, game_pk: int) -> int:
         with self.connect() as db:
             row = db.execute("SELECT substr(game_date, 1, 4) FROM games WHERE game_pk=?", (game_pk,)).fetchone()
-        return int(row[0]) if row and row[0] else datetime.now(timezone.utc).year
+        return int(row[0]) if row and row[0] else datetime.now(UTC_ZONE).year
 
     def game_datetime(self, game_pk: int) -> str | None:
         with self.connect() as db:
@@ -84,9 +85,9 @@ class Store:
         return row[0] if row else None
 
     def upsert_pitcher_stats(self, stats: dict) -> None:
-        as_of_datetime = stats.get("as_of_datetime") or datetime.now(timezone.utc).isoformat()
+        as_of_datetime = stats.get("as_of_datetime") or datetime.now(UTC_ZONE).isoformat()
         with self.connect() as db:
-            db.execute("INSERT INTO pitcher_season_stats(pitcher_id, season, era, wins, losses, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(pitcher_id, season) DO UPDATE SET era=excluded.era, wins=excluded.wins, losses=excluded.losses, updated_at=excluded.updated_at", (stats["pitcher_id"], stats["season"], stats.get("era"), stats.get("wins", 0), stats.get("losses", 0), datetime.now(timezone.utc).isoformat()))
+            db.execute("INSERT INTO pitcher_season_stats(pitcher_id, season, era, wins, losses, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(pitcher_id, season) DO UPDATE SET era=excluded.era, wins=excluded.wins, losses=excluded.losses, updated_at=excluded.updated_at", (stats["pitcher_id"], stats["season"], stats.get("era"), stats.get("wins", 0), stats.get("losses", 0), datetime.now(UTC_ZONE).isoformat()))
             db.execute("INSERT INTO pitcher_stat_snapshots(pitcher_id, season, as_of_datetime, era, wins, losses) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(pitcher_id, season, as_of_datetime) DO UPDATE SET era=excluded.era, wins=excluded.wins, losses=excluded.losses", (stats["pitcher_id"], stats["season"], as_of_datetime, stats.get("era"), stats.get("wins", 0), stats.get("losses", 0)))
 
     def save_feature_snapshot(self, game_pk: int, features: dict, model_version: str = "") -> None:
@@ -94,7 +95,7 @@ class Store:
         with self.connect() as db:
             db.execute(
                 "INSERT INTO feature_snapshots(game_pk, created_at, feature_json, home_win, model_version) VALUES (?, ?, ?, (SELECT CASE WHEN home_score > away_score THEN 1 WHEN home_score IS NOT NULL AND away_score IS NOT NULL THEN 0 END FROM games WHERE game_pk=?), ?) ON CONFLICT(game_pk) DO UPDATE SET created_at=excluded.created_at, feature_json=excluded.feature_json, home_win=excluded.home_win, model_version=excluded.model_version",
-                (game_pk, datetime.now(timezone.utc).isoformat(), json.dumps(features, sort_keys=True), game_pk, model_version),
+                (game_pk, datetime.now(UTC_ZONE).isoformat(), json.dumps(features, sort_keys=True), game_pk, model_version),
             )
 
     def save_prediction(self, game_pk: int, home_probability: float, away_probability: float, model_version: str, explanation: str) -> None:
@@ -107,12 +108,12 @@ class Store:
         with self.connect() as db:
             db.execute(
                 "INSERT INTO predictions(game_pk, created_at, home_probability, away_probability, model_version, explanation) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(game_pk) DO UPDATE SET created_at=excluded.created_at, home_probability=excluded.home_probability, away_probability=excluded.away_probability, model_version=excluded.model_version, explanation=excluded.explanation",
-                (game_pk, datetime.now(timezone.utc).isoformat(), home_probability, away_probability, model_version, explanation),
+                (game_pk, datetime.now(UTC_ZONE).isoformat(), home_probability, away_probability, model_version, explanation),
             )
 
     def pitcher_stats(self, pitcher_id: int | None, season: int | None = None, as_of_datetime: str | None = None) -> dict:
         if not pitcher_id: return {"era": None, "wins": 0, "losses": 0, "available": False}
-        season = season or datetime.now(timezone.utc).year
+        season = season or datetime.now(UTC_ZONE).year
         with self.connect() as db:
             if as_of_datetime is None:
                 row = db.execute("SELECT era, wins, losses, as_of_datetime FROM pitcher_stat_snapshots WHERE pitcher_id=? AND season=? ORDER BY as_of_datetime DESC LIMIT 1", (pitcher_id, season)).fetchone()
@@ -142,18 +143,22 @@ class Store:
                     (SELECT 9.0 * SUM(p.earned_runs) / NULLIF(SUM(p.outs_pitched), 0)
                      FROM pitcher_game_stats p
                      WHERE p.pitcher_id = games.home_probable_pitcher_id
+                       AND substr(p.game_datetime, 1, 4) = substr(games.game_date, 1, 4)
                        AND p.game_datetime < COALESCE(games.game_datetime, games.game_date || 'T00:00:00Z')) AS home_pitcher_era,
                     (SELECT MAX(p.game_datetime)
                      FROM pitcher_game_stats p
                      WHERE p.pitcher_id = games.home_probable_pitcher_id
+                       AND substr(p.game_datetime, 1, 4) = substr(games.game_date, 1, 4)
                        AND p.game_datetime < COALESCE(games.game_datetime, games.game_date || 'T00:00:00Z')) AS home_pitcher_era_as_of,
                     (SELECT 9.0 * SUM(p.earned_runs) / NULLIF(SUM(p.outs_pitched), 0)
                      FROM pitcher_game_stats p
                      WHERE p.pitcher_id = games.away_probable_pitcher_id
+                       AND substr(p.game_datetime, 1, 4) = substr(games.game_date, 1, 4)
                        AND p.game_datetime < COALESCE(games.game_datetime, games.game_date || 'T00:00:00Z')) AS away_pitcher_era,
                     (SELECT MAX(p.game_datetime)
                      FROM pitcher_game_stats p
                      WHERE p.pitcher_id = games.away_probable_pitcher_id
+                       AND substr(p.game_datetime, 1, 4) = substr(games.game_date, 1, 4)
                        AND p.game_datetime < COALESCE(games.game_datetime, games.game_date || 'T00:00:00Z')) AS away_pitcher_era_as_of
                 FROM games
                 WHERE status = 'Final' AND game_type = 'R'
@@ -171,7 +176,7 @@ class Store:
 
     def team_record(self, team_id: int, season: int | None = None) -> dict:
         """Return a season-to-date record and active streak."""
-        season = season or datetime.now(timezone.utc).year
+        season = season or datetime.now(UTC_ZONE).year
         with self.connect() as db:
             games = db.execute("SELECT home_team_id, away_team_id, home_score, away_score FROM games WHERE status = 'Final' AND (game_type = 'R' OR (game_type IS NULL AND substr(game_date, 6, 2) >= '04')) AND home_score IS NOT NULL AND away_score IS NOT NULL AND substr(game_date, 1, 4) = ? ORDER BY COALESCE(game_datetime, game_date), game_pk", (str(season),)).fetchall()
         wins = losses = streak = 0
@@ -186,7 +191,7 @@ class Store:
 
     def pitcher_record(self, pitcher_id: int | None, season: int | None = None) -> dict:
         """Return a season-to-date record for a probable/starting pitcher."""
-        season = season or datetime.now(timezone.utc).year
+        season = season or datetime.now(UTC_ZONE).year
         if not pitcher_id:
             return {"wins": 0, "losses": 0, "streak": 0, "available": False}
         with self.connect() as db:

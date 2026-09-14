@@ -1,10 +1,17 @@
 """Streamlit interface for readable MLB forecasts."""
-from datetime import date, timedelta
 import json
+from datetime import date, datetime, timedelta, timezone
+
 import pandas as pd
 import streamlit as st
 
-from src.data.ingest import backfill_historical, refresh_game_details, refresh_games, refresh_probable_pitcher_stats, refresh_teams
+from src.data.ingest import (
+    backfill_historical,
+    refresh_game_details,
+    refresh_games,
+    refresh_probable_pitcher_stats,
+    refresh_teams,
+)
 from src.data.mlb_api import MLBAPIError, MLBClient, format_pacific_time
 from src.data.store import Store
 from src.models.features import build_features, build_prediction_features
@@ -16,6 +23,7 @@ st.markdown("<style>.block-container{max-width:1200px;padding-top:2rem}.hero{pad
 st.markdown("<div class='hero'><h1>⚾ MLB Forecast</h1><p>Early and lineup-enhanced win probabilities for scheduled MLB games.</p></div>", unsafe_allow_html=True)
 
 store, client = Store(), MLBClient()
+today = datetime.now(timezone.utc).date()  # noqa: UP017
 
 def game_label(game):
     return f"{game['away_team_name']} at {game['home_team_name']} · {game['game_date']}"
@@ -24,7 +32,7 @@ def feature_input(game):
     home_lineup = json.loads(game["home_lineup_json"] or "[]")
     away_lineup = json.loads(game["away_lineup_json"] or "[]")
     season = int(str(game["game_date"])[:4])
-    game_time = game["game_datetime"] or f"{game['game_date']}T23:59:59Z"
+    game_time = game["game_datetime"] or f"{game['game_date']}T00:00:00Z"
     home_stats, away_stats = store.pitcher_stats(game["home_probable_pitcher_id"], season, game_time), store.pitcher_stats(game["away_probable_pitcher_id"], season, game_time)
     candidate = dict(game)
     candidate.update({"home_lineup": home_lineup, "away_lineup": away_lineup, "home_pitcher_era": home_stats["era"] if home_stats["available"] else 4.20, "away_pitcher_era": away_stats["era"] if away_stats["available"] else 4.20, "home_pitcher_era_as_of": home_stats.get("as_of_datetime"), "away_pitcher_era_as_of": away_stats.get("as_of_datetime")})
@@ -51,14 +59,14 @@ with st.sidebar:
     if st.button("Refresh upcoming games", use_container_width=True):
         try:
             refresh_teams(store, client)
-            refresh_games(store, client, date.today(), date.today() + timedelta(days=7))
-            upcoming = [dict(row) for row in store.upcoming_games(start_date=date.today())]
+            refresh_games(store, client, today, today + timedelta(days=7))
+            upcoming = [dict(row) for row in store.upcoming_games(start_date=today)]
             stats_count = refresh_probable_pitcher_stats(store, client, upcoming)
             st.success(f"Updated {len(upcoming)} schedule rows and cached {stats_count} pitcher stat records. Existing games were not duplicated.")
         except MLBAPIError as exc: st.error(str(exc))
     if st.button("Backfill last 3 seasons", use_container_width=True):
         try:
-            count = backfill_historical(store, client, date(date.today().year - 3, 1, 1), date.today())
+            count = backfill_historical(store, client, date(today.year - 3, 1, 1), today)
             st.success(f"Backfilled {count} rows. Existing game IDs were updated.")
         except MLBAPIError as exc: st.error(str(exc))
     if st.button("Train models", use_container_width=True):
@@ -73,7 +81,7 @@ with st.sidebar:
 tab_schedule, tab_forecast, tab_status = st.tabs(["Upcoming games", "Matchup forecast", "Database & model"])
 with tab_schedule:
     st.subheader("Upcoming schedule")
-    games = store.upcoming_games(start_date=date.today())
+    games = store.upcoming_games(start_date=today)
     if not games: st.info("Click Refresh upcoming games to load the schedule.")
     for game in games:
         with st.container(border=True):
@@ -94,7 +102,7 @@ with tab_schedule:
 
 with tab_forecast:
     st.subheader("Matchup forecast")
-    games = store.upcoming_games(start_date=date.today())
+    games = store.upcoming_games(start_date=today)
     if games:
         options = {game_label(g): g for g in games}
         selected = st.selectbox("Select a game", list(options))

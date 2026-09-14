@@ -1,7 +1,9 @@
 import pandas as pd
 import pytest
+
 from src.models.features import ENHANCED_FEATURE_COLUMNS, FEATURE_COLUMNS, build_features, build_prediction_features
 from src.models.trainer import chronological_folds
+
 
 def test_features_do_not_use_current_game_score():
     games = pd.DataFrame([{"game_pk": 1, "game_date": "2026-04-01", "home_team_id": 1, "away_team_id": 2, "home_score": 10, "away_score": 0, "home_probable_pitcher_id": None, "away_probable_pitcher_id": None}, {"game_pk": 2, "game_date": "2026-04-02", "home_team_id": 1, "away_team_id": 2, "home_score": 2, "away_score": 1, "home_probable_pitcher_id": 3, "away_probable_pitcher_id": 4}])

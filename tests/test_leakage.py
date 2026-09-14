@@ -1,4 +1,3 @@
-from datetime import date
 
 import pandas as pd
 
@@ -58,3 +57,17 @@ def test_completed_game_without_time_excludes_same_day_pitcher_appearance(tmp_pa
     row = store.completed_games()[0]
 
     assert row["home_pitcher_era"] is None
+
+
+def test_historical_pitcher_era_does_not_cross_seasons(tmp_path):
+    store = Store(str(tmp_path / "mlb.sqlite"))
+    store.upsert_games([
+        {"gamePk": 1, "officialDate": "2025-09-30", "gameDate": "2025-09-30T19:00:00Z", "status": {"abstractGameState": "Final"}, "gameType": "R", "teams": {"home": {"team": {"id": 1}, "score": 5, "probablePitcher": {"id": 10}}, "away": {"team": {"id": 2}, "score": 3, "probablePitcher": {"id": 20}}}},
+        {"gamePk": 2, "officialDate": "2026-04-01", "gameDate": "2026-04-01T19:00:00Z", "status": {"abstractGameState": "Final"}, "gameType": "R", "teams": {"home": {"team": {"id": 1}, "score": 4, "probablePitcher": {"id": 10}}, "away": {"team": {"id": 2}, "score": 2, "probablePitcher": {"id": 20}}}},
+    ])
+    store.upsert_game_details(1, {"home_lineup": [], "away_lineup": [], "pitcher_game_stats": [{"pitcher_id": 10, "innings_pitched": 18, "earned_runs": 2}]})
+    store.upsert_game_details(2, {"home_lineup": [], "away_lineup": [], "pitcher_game_stats": [{"pitcher_id": 10, "innings_pitched": 21, "earned_runs": 0}]})
+
+    rows = store.completed_games()
+
+    assert rows[1]["home_pitcher_era"] is None

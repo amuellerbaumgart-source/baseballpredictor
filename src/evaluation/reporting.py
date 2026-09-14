@@ -47,6 +47,8 @@ def metrics_by_season(predictions: pd.DataFrame) -> dict[str, Evaluation]:
             raise ValueError("Predictions require game_date, game_datetime, or season.")
         frame["season"] = pd.to_datetime(dates, errors="coerce", utc=True).dt.year
     frame = frame.dropna(subset=["season"])
+    if frame.empty:
+        raise ValueError("Predictions must include at least one valid season.")
     return {
         str(season): evaluate_probabilities(group["actual_home_win"], group["home_probability"])
         for season, group in frame.groupby("season", sort=True)

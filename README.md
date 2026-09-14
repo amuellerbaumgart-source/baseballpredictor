@@ -92,6 +92,8 @@ The early model can predict without lineups. The enhanced model is selected only
 
 The app displays full team names, venue, city, venue-local time, team records, active streaks, probable pitchers, pitcher records, ERA, lineup status, and the selected model.
 
+The current enhanced lineup features are intentionally modest: `home_lineup_strength` and `away_lineup_strength` count named hitters, while `lineup_complete` indicates whether both sides have at least nine. They are completeness proxies, not measures of hitter quality. Player-level batting statistics and handedness are future feature work.
+
 Each generated forecast stores the feature values, model version, probabilities, and explanation in the local database. This preserves what the model used at prediction time.
 
 ## Leakage-prevention policy
