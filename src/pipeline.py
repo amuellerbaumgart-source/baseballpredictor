@@ -16,6 +16,7 @@ from src.data.ingest import (
 from src.data.mlb_api import MLBClient
 from src.data.store import Store
 from src.evaluation.baselines import evaluate_baselines
+from src.evaluation.reporting import calibration_table, metrics_by_season
 from src.evaluation.walk_forward import evaluate_walk_forward
 from src.models.features import EARLY_FEATURE_COLUMNS, build_features
 from src.models.trainer import train_models
@@ -52,8 +53,16 @@ def main() -> None:
     features = build_features(pd.DataFrame(rows))
     if args.action == "evaluate":
         result = evaluate_walk_forward(features, EARLY_FEATURE_COLUMNS)
-        output = {"walk_forward_model": result.metrics.to_dict()}
-        output["baselines"] = {name: benchmark.metrics.to_dict() for name, benchmark in evaluate_baselines(features).items()}
+        output = {
+            "walk_forward_model": result.metrics.to_dict(),
+            "calibration": calibration_table(
+                result.predictions["actual_home_win"], result.predictions["home_probability"]
+            ).to_dict(orient="records"),
+            "by_season": {season: metrics.to_dict() for season, metrics in metrics_by_season(result.predictions).items()},
+        }
+        output["baselines"] = {
+            name: benchmark.metrics.to_dict() for name, benchmark in evaluate_baselines(features, test_start=30).items()
+        }
         print(output)
         return
     metrics = train_models(features)

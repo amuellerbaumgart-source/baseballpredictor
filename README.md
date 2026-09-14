@@ -102,7 +102,7 @@ When completed-game feeds are available, pitcher game logs are stored as outs pi
 
 Model artifacts include their feature list, training/test row counts, model version, and evaluation metrics. ROC-AUC is reported as unavailable when a validation split contains only one class.
 
-To measure realistic out-of-sample performance, run `python -m src.pipeline evaluate`. This uses an expanding training window: each game is predicted only from eligible earlier games, and the resulting log loss, Brier score, accuracy, and ROC-AUC are printed. The output also includes a constant home-team benchmark and an expanding Elo benchmark. The first `min_train_size` games are reserved for the model's initial training window; the Elo benchmark begins at the first eligible game and updates only after each result.
+To measure realistic out-of-sample performance, run `python -m src.pipeline evaluate`. This uses an expanding training window: each game is predicted only from eligible earlier games, and the resulting log loss, Brier score, accuracy, and ROC-AUC are printed. The output also includes a constant home-team benchmark and an expanding Elo benchmark scored on the same holdout window. Calibration bins compare predicted probability with observed win rate, and metrics are reported by season. The first 30 games are reserved for the model's initial training window; the Elo benchmark uses those games as rating warm-up but does not score them.
 
 ## Database and generated files
 

@@ -49,6 +49,9 @@ def evaluate_walk_forward(
             {
                 "game_pk": row.get("game_pk"),
                 "game_datetime": row.get("game_datetime"),
+                "season": pd.to_datetime(row.get("game_datetime"), errors="coerce", utc=True).year
+                if pd.notna(row.get("game_datetime"))
+                else row.get("game_date", "")[:4],
                 "actual_home_win": int(row["home_win"]),
                 "home_probability": probability,
                 "train_rows": test_index,
