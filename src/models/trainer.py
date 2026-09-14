@@ -1,27 +1,18 @@
 """Training and evaluation for the first calibrated model."""
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 
 import joblib
 import pandas as pd
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, brier_score_loss, log_loss, roc_auc_score
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import TimeSeriesSplit
 
+from src.evaluation.metrics import Evaluation, evaluate_probabilities
 from .features import EARLY_FEATURE_COLUMNS, ENHANCED_FEATURE_COLUMNS
-
-
-@dataclass
-class Evaluation:
-    log_loss: float
-    brier_score: float
-    accuracy: float
-    roc_auc: float
 
 
 def chronological_folds(n_samples: int):
@@ -32,7 +23,8 @@ def chronological_folds(n_samples: int):
 
 
 def _fit(frame: pd.DataFrame, features: list[str], artifact_path: str, version: str) -> Evaluation:
-    frame = frame.sort_values("game_pk").dropna(subset=features + ["home_win"])
+    sort_columns = [column for column in ("game_datetime", "game_date", "game_pk") if column in frame]
+    frame = frame.sort_values(sort_columns, kind="mergesort").dropna(subset=features + ["home_win"])
     if len(frame) < 30:
         raise ValueError("At least 30 historical games are required to train the model.")
     split = max(1, int(len(frame) * 0.8))
@@ -43,9 +35,9 @@ def _fit(frame: pd.DataFrame, features: list[str], artifact_path: str, version: 
     model = CalibratedClassifierCV(base, method="sigmoid", cv=chronological_folds(len(train)))
     model.fit(train[features], train["home_win"])
     probabilities = model.predict_proba(test[features])[:, 1]
-    metrics = Evaluation(log_loss(test["home_win"], probabilities), brier_score_loss(test["home_win"], probabilities), accuracy_score(test["home_win"], probabilities >= 0.5), roc_auc_score(test["home_win"], probabilities))
+    metrics = evaluate_probabilities(test["home_win"], probabilities)
     Path(artifact_path).parent.mkdir(parents=True, exist_ok=True)
-    joblib.dump({"model": model, "features": features, "version": version}, artifact_path)
+    joblib.dump({"model": model, "features": features, "version": version, "evaluation": metrics.to_dict(), "training_rows": len(train), "test_rows": len(test)}, artifact_path)
     return metrics
 
 

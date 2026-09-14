@@ -116,7 +116,10 @@ with tab_forecast:
             try: refresh_game_details(store, client, game["game_pk"]); st.rerun()
             except MLBAPIError as exc: st.error(str(exc))
         if st.button("Generate forecast", type="primary"):
-            result, version = predict_with_model(game["home_team_name"], game["away_team_name"], feature_input(game))
+            forecast_features = feature_input(game)
+            result, version = predict_with_model(game["home_team_name"], game["away_team_name"], forecast_features)
+            store.save_feature_snapshot(game["game_pk"], forecast_features, version)
+            store.save_prediction(game["game_pk"], result.home_win_probability, result.away_win_probability, version, result.explanation)
             c1, c2 = st.columns(2); c1.metric(f"{game['home_team_name']} win probability", f"{result.home_win_probability:.1%}"); c2.metric(f"{game['away_team_name']} win probability", f"{result.away_win_probability:.1%}")
             st.caption(f"Model: {version} · Lineup state: {game['lineup_status']} · MLB game ID: {game['game_pk']}"); st.info(result.explanation)
     else: st.info("Load upcoming games first.")

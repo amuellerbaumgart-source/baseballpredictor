@@ -10,3 +10,4 @@ data/processed/*
 data/*.sqlite
 models/*
 !.gitkeep
+.ruff_cache/

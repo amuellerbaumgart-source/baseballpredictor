@@ -47,6 +47,8 @@ pytest
 
 The tests use mocked API responses and do not require internet access.
 
+For development tools such as pytest and Ruff, install `requirements-dev.txt` instead.
+
 ## 5. Start the app
 
 ```bash
@@ -90,9 +92,13 @@ The early model can predict without lineups. The enhanced model is selected only
 
 The app displays full team names, venue, city, venue-local time, team records, active streaks, probable pitchers, pitcher records, ERA, lineup status, and the selected model.
 
+Each generated forecast stores the feature values, model version, probabilities, and explanation in the local database. This preserves what the model used at prediction time.
+
 ## Leakage-prevention policy
 
 Historical features must use only information available before the scheduled game. Game rows are processed deterministically by `game_datetime` and then `game_pk`, so same-day doubleheaders have a stable order. Season statistics are stored with an `as_of_datetime` snapshot and are eligible only when that snapshot is no later than the game time. Unqualified full-season pitcher statistics are not joined into historical training rows; unavailable pregame statistics use the documented neutral fallback instead.
+
+Model artifacts include their feature list, training/test row counts, model version, and evaluation metrics. ROC-AUC is reported as unavailable when a validation split contains only one class.
 
 ## Database and generated files
 
@@ -115,6 +121,8 @@ src/models/trainer.py   Chronological training and probability calibration
 src/models/predictor.py Model selection and prediction output
 src/pipeline.py         Command-line refresh, backfill, and training commands
 tests/                  API, database, feature, and leakage tests
+pyproject.toml          Python version, dependencies, test, and lint configuration
+.github/workflows/ci.yml Automated test and compile workflow
 ```
 
 ## Troubleshooting

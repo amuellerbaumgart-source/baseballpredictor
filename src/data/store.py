@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import sqlite3
 import json
+import math
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Iterable
@@ -74,6 +75,27 @@ class Store:
         with self.connect() as db:
             db.execute("INSERT INTO pitcher_season_stats(pitcher_id, season, era, wins, losses, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(pitcher_id, season) DO UPDATE SET era=excluded.era, wins=excluded.wins, losses=excluded.losses, updated_at=excluded.updated_at", (stats["pitcher_id"], stats["season"], stats.get("era"), stats.get("wins", 0), stats.get("losses", 0), datetime.now(timezone.utc).isoformat()))
             db.execute("INSERT INTO pitcher_stat_snapshots(pitcher_id, season, as_of_datetime, era, wins, losses) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(pitcher_id, season, as_of_datetime) DO UPDATE SET era=excluded.era, wins=excluded.wins, losses=excluded.losses", (stats["pitcher_id"], stats["season"], as_of_datetime, stats.get("era"), stats.get("wins", 0), stats.get("losses", 0)))
+
+    def save_feature_snapshot(self, game_pk: int, features: dict, model_version: str = "") -> None:
+        """Persist the exact feature values used for a forecast."""
+        with self.connect() as db:
+            db.execute(
+                "INSERT INTO feature_snapshots(game_pk, created_at, feature_json, home_win, model_version) VALUES (?, ?, ?, (SELECT CASE WHEN home_score > away_score THEN 1 WHEN home_score IS NOT NULL AND away_score IS NOT NULL THEN 0 END FROM games WHERE game_pk=?), ?) ON CONFLICT(game_pk) DO UPDATE SET created_at=excluded.created_at, feature_json=excluded.feature_json, home_win=excluded.home_win, model_version=excluded.model_version",
+                (game_pk, datetime.now(timezone.utc).isoformat(), json.dumps(features, sort_keys=True), game_pk, model_version),
+            )
+
+    def save_prediction(self, game_pk: int, home_probability: float, away_probability: float, model_version: str, explanation: str) -> None:
+        if not all(math.isfinite(float(value)) for value in (home_probability, away_probability)):
+            raise ValueError("Prediction probabilities must be finite numbers.")
+        if not all(0.0 <= float(value) <= 1.0 for value in (home_probability, away_probability)):
+            raise ValueError("Prediction probabilities must be between 0 and 1.")
+        if not math.isclose(float(home_probability) + float(away_probability), 1.0, abs_tol=1e-6):
+            raise ValueError("Home and away probabilities must sum to 1.")
+        with self.connect() as db:
+            db.execute(
+                "INSERT INTO predictions(game_pk, created_at, home_probability, away_probability, model_version, explanation) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(game_pk) DO UPDATE SET created_at=excluded.created_at, home_probability=excluded.home_probability, away_probability=excluded.away_probability, model_version=excluded.model_version, explanation=excluded.explanation",
+                (game_pk, datetime.now(timezone.utc).isoformat(), home_probability, away_probability, model_version, explanation),
+            )
 
     def pitcher_stats(self, pitcher_id: int | None, season: int | None = None, as_of_datetime: str | None = None) -> dict:
         if not pitcher_id: return {"era": None, "wins": 0, "losses": 0, "available": False}
